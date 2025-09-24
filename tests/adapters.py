@@ -9,6 +9,8 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
+from cs336_basics.train_bpe import get_most_frequent_pair, merge_pair, pretokenize
+
 
 def run_linear(
     d_in: int,
@@ -452,7 +454,9 @@ def run_cross_entropy(
     raise NotImplementedError
 
 
-def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
+def run_gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter], max_l2_norm: float
+) -> None:
     """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
 
     Args:
@@ -589,4 +593,21 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    raise NotImplementedError
+    vocab = [bytes([i]) for i in range(256)] + [
+        token.encode("utf-8") for token in special_tokens
+    ]
+    merges = []
+
+    pretoken_counts = pretokenize(input_path, special_tokens)
+
+    num_merges = vocab_size - len(vocab)
+    for _ in range(num_merges):
+        pair = get_most_frequent_pair(pretoken_counts, vocab)
+        byte1, byte2 = map(lambda x: vocab[x], pair)
+
+        merges.append((byte1, byte2))
+        vocab.append(byte1 + byte2)
+
+        merge_pair(pretoken_counts, pair, len(vocab) - 1)
+
+    return {i: token for i, token in enumerate(vocab)}, merges
