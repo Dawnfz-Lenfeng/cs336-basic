@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import os
 from collections.abc import Iterable
 from typing import IO, Any, BinaryIO
@@ -598,16 +599,22 @@ def run_train_bpe(
     ]
     merges = []
 
-    pretoken_counts = pretokenize(input_path, special_tokens)
+    pretoken_counts = pretokenize(input_path, special_tokens)  # (token, ...) -> count
+    pair_counts: Counter[tuple[int, int]] = Counter()  # (tolen, token) -> count
+
+    for pretoken, count in pretoken_counts.items():
+        for pair in zip(pretoken[:-1], pretoken[1:]):
+            pair_counts[pair] += count
 
     num_merges = vocab_size - len(vocab)
     for _ in range(num_merges):
-        pair = get_most_frequent_pair(pretoken_counts, vocab)
+        pair = get_most_frequent_pair(pair_counts, vocab)
         byte1, byte2 = map(lambda x: vocab[x], pair)
 
         merges.append((byte1, byte2))
         vocab.append(byte1 + byte2)
 
-        merge_pair(pretoken_counts, pair, len(vocab) - 1)
+        del pair_counts[pair]  # delete most frequent pair
+        merge_pair(pretoken_counts, pair_counts, pair, len(vocab) - 1)
 
     return {i: token for i, token in enumerate(vocab)}, merges
