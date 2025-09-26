@@ -11,8 +11,8 @@ from torch import Tensor
 
 from cs336_basics.lazy_heap import LazyHeap
 from cs336_basics.train_bpe import (
-    pop_most_frequent_pair,
     merge_pair,
+    pop_most_frequent_pair,
     pretoken2pair,
     pretokenize,
 )

@@ -33,7 +33,7 @@ class LazyHeap:
         return len(self.pair_counts)
 
     def __repr__(self) -> str:
-        return f"LazyHeap(pair_counts={self.pair_counts}, heap={self.heap}), deleted={self.deleted}"
+        return f"LazyHeap(pair_counts={self.pair_counts}, heap={self.heap}, deleted={self.deleted})"
 
     def pop(self) -> tuple[tuple[int, int], int]:
         """Pop the most frequent pair from the heap"""

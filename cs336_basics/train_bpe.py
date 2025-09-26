@@ -2,6 +2,7 @@ import os
 from collections import Counter
 
 import regex as re
+
 from .lazy_heap import LazyHeap
 
 PAT = re.compile(
@@ -80,41 +81,64 @@ def merge_pair(
     new_token: int,
 ):
     """Merge a pair of tokens in the pretoken counts, updating the counts of the new and adjacent pairs"""
-    items_to_update = []
+    token1, token2 = pair_to_merge
+
+    # get all pretokens that need to be merged
+    items_to_merge: list[tuple[tuple[int, ...], int]] = []
     for pretoken, count in pretoken_counts.items():
-        new_pretoken = []
-        need_update = False
+        # most pretokens do not need to be merged
+        # so token1 not in pretoken or token2 not in pretoken is a fast check
+        if len(pretoken) < 2 or token1 not in pretoken or token2 not in pretoken:
+            continue
 
-        i = 0
-        while i < len(pretoken):
-            if (
-                i + 1 < len(pretoken)
-                and (pretoken[i], pretoken[i + 1]) == pair_to_merge
-            ):
-                need_update = True
-
-                # left adjacent pair
-                if i > 0:
-                    # if left pretoken has been merged,
-                    # its right adjacent pair is just current left adjacent pair
-                    if new_pretoken[-1] != new_token:
-                        pair_heap[(pretoken[i - 1], pretoken[i])] -= count
-                    pair_heap[(pretoken[i - 1], new_token)] += count
-
-                # right adjacent pair
-                if i + 2 < len(pretoken):
-                    pair_heap[(pretoken[i + 1], pretoken[i + 2])] -= count
-                    pair_heap[(new_token, pretoken[i + 2])] += count
-
-                new_pretoken.append(new_token)
-                i += 2
-            else:
-                new_pretoken.append(pretoken[i])
-                i += 1
-
+        need_update = any(
+            pair == pair_to_merge for pair in zip(pretoken[:-1], pretoken[1:])
+        )
         if need_update:
-            items_to_update.append((pretoken, tuple(new_pretoken), count))
+            items_to_merge.append((pretoken, count))
 
-    for pretoken, new_pretoken, count in items_to_update:
+    for pretoken, count in items_to_merge:
+        new_pretoken, pair_delta = _merge_pretoken(
+            pretoken, count, pair_to_merge, new_token
+        )
+        # merge in pretoken counts
         del pretoken_counts[pretoken]
         pretoken_counts[new_pretoken] += count
+
+        # update pair heap
+        for pair, delta_count in pair_delta:
+            pair_heap[pair] += delta_count
+
+
+def _merge_pretoken(
+    pretoken: tuple[int, ...],
+    count: int,
+    pair_to_merge: tuple[int, int],
+    new_token: int,
+) -> tuple[tuple[int, ...], list[tuple[tuple[int, int], int]]]:
+    new_pretoken = []
+    pair_delta = []
+
+    i = 0
+    while i < len(pretoken):
+        if i + 1 < len(pretoken) and (pretoken[i], pretoken[i + 1]) == pair_to_merge:
+            # left adjacent pair
+            if i > 0:
+                # if left pretoken has been merged,
+                # its right adjacent pair is just current left adjacent pair
+                if new_pretoken[-1] != new_token:
+                    pair_delta.append(((pretoken[i - 1], pretoken[i]), -count))
+                pair_delta.append(((pretoken[i - 1], new_token), count))
+
+            # right adjacent pair
+            if i + 2 < len(pretoken):
+                pair_delta.append(((pretoken[i + 1], pretoken[i + 2]), -count))
+                pair_delta.append(((new_token, pretoken[i + 2]), count))
+
+            new_pretoken.append(new_token)
+            i += 2
+        else:
+            new_pretoken.append(pretoken[i])
+            i += 1
+
+    return tuple(new_pretoken), pair_delta
