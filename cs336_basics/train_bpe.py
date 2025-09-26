@@ -5,9 +5,7 @@ import regex as re
 
 from .lazy_heap import LazyHeap
 
-PAT = re.compile(
-    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-)
+PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
 
 def pretokenize(
@@ -26,12 +24,8 @@ def pretokenize(
 
     counter = Counter()
     for chunk in chunks:
-        pretokens = [
-            tuple(match.group().encode("utf-8")) for match in PAT.finditer(chunk)
-        ]
-        counter.update(
-            Counter(pretoken for pretoken in pretokens if len(pretoken) >= 2)
-        )
+        pretokens = [tuple(match.group().encode("utf-8")) for match in PAT.finditer(chunk)]
+        counter.update(Counter(pretoken for pretoken in pretokens if len(pretoken) >= 2))
 
     return counter
 
@@ -91,16 +85,12 @@ def merge_pair(
         if len(pretoken) < 2 or token1 not in pretoken or token2 not in pretoken:
             continue
 
-        need_update = any(
-            pair == pair_to_merge for pair in zip(pretoken[:-1], pretoken[1:])
-        )
+        need_update = any(pair == pair_to_merge for pair in zip(pretoken[:-1], pretoken[1:]))
         if need_update:
             items_to_merge.append((pretoken, count))
 
     for pretoken, count in items_to_merge:
-        new_pretoken, pair_delta = _merge_pretoken(
-            pretoken, count, pair_to_merge, new_token
-        )
+        new_pretoken, pair_delta = _merge_pretoken(pretoken, count, pair_to_merge, new_token)
         # merge in pretoken counts
         del pretoken_counts[pretoken]
         pretoken_counts[new_pretoken] += count

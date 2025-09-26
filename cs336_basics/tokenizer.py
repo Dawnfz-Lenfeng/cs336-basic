@@ -16,9 +16,7 @@ class BPETokenizer:
         self.vocab = vocab
         self.merges = merges
         self.special_pattern = re.compile(
-            "(" + "|".join(re.escape(token) for token in self.special_tokens) + ")"
-            if special_tokens
-            else None
+            "(" + "|".join(re.escape(token) for token in self.special_tokens) + ")" if special_tokens else None
         )
         self.special_token_set = set(special_tokens)
 
@@ -41,9 +39,7 @@ class BPETokenizer:
         with open(merges_filepath, encoding="utf-8") as f:
             lines = f.read().split("\n")
 
-        merges = [
-            tuple(token.encode("utf-8") for token in line.split()) for line in lines
-        ]
+        merges = [tuple(token.encode("utf-8") for token in line.split()) for line in lines]
 
         return cls(vocab, merges, special_tokens)
 
@@ -62,16 +58,8 @@ class BPETokenizer:
             if part in self.special_token_set:
                 ids.append(self.encoder(part.encode("utf-8")))
             elif part:
-                pretokens = [
-                    bytes([b])
-                    for match in PAT.finditer(text)
-                    for b in match.group().encode("utf-8")
-                ]
-                ids.append(
-                    self.encoder[token]
-                    for pretoken in pretokens
-                    for token in self._merge_pretoken(pretoken)
-                )
+                pretokens = [bytes([b]) for match in PAT.finditer(text) for b in match.group().encode("utf-8")]
+                ids.append(self.encoder[token] for pretoken in pretokens for token in self._merge_pretoken(pretoken))
 
         return ids
 
@@ -106,10 +94,7 @@ class BPETokenizer:
             new_pretoken = []
             i = 0
             while i < len(pretoken):
-                if (
-                    i + 1 < len(pretoken)
-                    and (pretoken[i], pretoken[i + 1]) == pair_to_merge
-                ):
+                if i + 1 < len(pretoken) and (pretoken[i], pretoken[i + 1]) == pair_to_merge:
                     new_pretoken.append(pretoken[i] + pretoken[i + 1])
                     i += 2
                 else:
