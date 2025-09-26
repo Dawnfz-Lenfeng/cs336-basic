@@ -1,7 +1,8 @@
 import os
-from collections import Counter, defaultdict
+from collections import Counter
 
 import regex as re
+from .lazy_heap import LazyHeap
 
 PAT = re.compile(
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -12,37 +13,73 @@ def pretokenize(
     input_path: str | os.PathLike,
     special_tokens: list[str],
 ) -> Counter[tuple[int, ...]]:
+    """Transform text into a list of pretokens"""
     with open(input_path, encoding="utf-8") as f:
         text = f.read()
 
     if special_tokens:
         split_pattern = "|".join(re.escape(token) for token in special_tokens)
-        text = re.sub(split_pattern, " ", text)
+        chunks = re.split(split_pattern, text)
+    else:
+        chunks = [text]
 
-    pretokens = PAT.finditer(text)
-    return Counter(
-        pretoken
-        for match in pretokens
-        if len(pretoken := tuple(match.group().encode("utf-8"))) >= 2
-    )
+    counter = Counter()
+    for chunk in chunks:
+        pretokens = [
+            tuple(match.group().encode("utf-8")) for match in PAT.finditer(chunk)
+        ]
+        counter.update(
+            Counter(pretoken for pretoken in pretokens if len(pretoken) >= 2)
+        )
+
+    return counter
 
 
-def get_most_frequent_pair(
-    pair_counts: Counter[tuple[int, int]],
-    vocab: dict[int, bytes],
+def pretoken2pair(
+    pretoken_counts: Counter[tuple[int, ...]],
+) -> Counter[tuple[int, int]]:
+    """Convert pretoken counts to pair counts"""
+    pair_counts: Counter[tuple[int, int]] = Counter()
+
+    for pretoken, count in pretoken_counts.items():
+        for pair in zip(pretoken[:-1], pretoken[1:]):
+            pair_counts[pair] += count
+
+    return pair_counts
+
+
+def pop_most_frequent_pair(
+    pair_heap: LazyHeap,
+    vocab: list[bytes],
 ) -> tuple[int, int]:
-    return max(
-        pair_counts,
-        key=lambda pair: (pair_counts[pair], [vocab[token] for token in pair]),
-    )
+    """Get the most frequent pair in the vocabulary"""
+    pair, max_count = pair_heap.pop()
+    pairs = [pair]
+
+    while pair_heap:
+        top, top_count = pair_heap.top()
+        if top_count < max_count:
+            break
+        pairs.append(top)
+        pair_heap.pop()
+
+    if len(pairs) == 1:
+        return pairs[0]
+    else:
+        max_pair = max(pairs, key=lambda p: (vocab[p[0]], vocab[p[1]]))
+        for pair in pairs:
+            if pair != max_pair:
+                pair_heap[pair] = max_count
+        return max_pair
 
 
 def merge_pair(
     pretoken_counts: Counter[tuple[int, ...]],
-    pair_counts: Counter[tuple[int, int]],
+    pair_heap: LazyHeap,
     pair_to_merge: tuple[int, int],
     new_token: int,
 ):
+    """Merge a pair of tokens in the pretoken counts, updating the counts of the new and adjacent pairs"""
     items_to_update = []
     for pretoken, count in pretoken_counts.items():
         new_pretoken = []
@@ -55,21 +92,21 @@ def merge_pair(
                 and (pretoken[i], pretoken[i + 1]) == pair_to_merge
             ):
                 need_update = True
-                new_pretoken.append(new_token)
 
+                # left adjacent pair
                 if i > 0:
-                    adj_pair = (pretoken[i - 1], pretoken[i])
-                    pair_counts[adj_pair] -= count
-                    if pair_counts[adj_pair] <= 0:
-                        del pair_counts[adj_pair]
-                    pair_counts[(pretoken[i - 1], new_token)] += count
-                if i + 2 < len(pretoken):
-                    adj_pair = (pretoken[i + 1], pretoken[i + 2])
-                    pair_counts[adj_pair] -= count
-                    if pair_counts[adj_pair] <= 0:
-                        del pair_counts[adj_pair]
-                    pair_counts[new_token, pretoken[i + 2]] += count
+                    # if left pretoken has been merged,
+                    # its right adjacent pair is just current left adjacent pair
+                    if new_pretoken[-1] != new_token:
+                        pair_heap[(pretoken[i - 1], pretoken[i])] -= count
+                    pair_heap[(pretoken[i - 1], new_token)] += count
 
+                # right adjacent pair
+                if i + 2 < len(pretoken):
+                    pair_heap[(pretoken[i + 1], pretoken[i + 2])] -= count
+                    pair_heap[(new_token, pretoken[i + 2])] += count
+
+                new_pretoken.append(new_token)
                 i += 2
             else:
                 new_pretoken.append(pretoken[i])
