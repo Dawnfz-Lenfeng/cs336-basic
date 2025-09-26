@@ -9,8 +9,9 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
-from cs336_basics.lazy_heap import LazyHeap
+from cs336_basics.tokenizer import BPETokenizer
 from cs336_basics.train_bpe import (
+    LazyHeap,
     merge_pair,
     pop_most_frequent_pair,
     pretoken2pair,
@@ -569,7 +570,7 @@ def get_tokenizer(
     Returns:
         A BPE tokenizer that uses the provided vocab, merges, and special tokens.
     """
-    raise NotImplementedError
+    return BPETokenizer(vocab, merges, special_tokens)
 
 
 def run_train_bpe(
