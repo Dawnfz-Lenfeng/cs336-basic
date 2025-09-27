@@ -18,16 +18,16 @@ def pretokenize(
 
     if special_tokens:
         split_pattern = "|".join(re.escape(token) for token in special_tokens)
-        chunks = re.split(split_pattern, text)
+        parts = re.split(split_pattern, text)
     else:
-        chunks = [text]
+        parts = [text]
 
-    counter = Counter()
-    for chunk in chunks:
-        pretokens = [tuple(match.group().encode("utf-8")) for match in PAT.finditer(chunk)]
-        counter.update(Counter(pretoken for pretoken in pretokens if len(pretoken) >= 2))
-
-    return counter
+    return Counter(
+        pretoken
+        for part in parts
+        for match in PAT.finditer(part)
+        if len(pretoken := tuple(match.group().encode("utf-8"))) >= 2
+    )
 
 
 def pretoken2pair(
@@ -85,13 +85,12 @@ def merge_pair(
         if len(pretoken) < 2 or token1 not in pretoken or token2 not in pretoken:
             continue
 
-        need_update = any(pair == pair_to_merge for pair in zip(pretoken[:-1], pretoken[1:]))
-        if need_update:
+        if any(pair == pair_to_merge for pair in zip(pretoken[:-1], pretoken[1:])):
             items_to_merge.append((pretoken, count))
 
     for pretoken, count in items_to_merge:
         new_pretoken, pair_delta = _merge_pretoken(pretoken, count, pair_to_merge, new_token)
-        # merge in pretoken counts
+        # update pretoken counts
         del pretoken_counts[pretoken]
         pretoken_counts[new_pretoken] += count
 
