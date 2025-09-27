@@ -602,7 +602,8 @@ def run_train_bpe(
     merges = []
 
     pretoken_counts = pretokenize(input_path, special_tokens)  # (token, ...) -> count
-    pair_heap = LazyHeap(dict(pretoken2pair(pretoken_counts)))
+    pair_counts, pair2pretoken = pretoken2pair(pretoken_counts)
+    pair_heap = LazyHeap(dict(pair_counts))
 
     num_merges = vocab_size - len(vocab)
     for _ in range(num_merges):
@@ -612,6 +613,6 @@ def run_train_bpe(
         merges.append((byte1, byte2))
         vocab.append(byte1 + byte2)
 
-        merge_pair(pretoken_counts, pair_heap, pair, len(vocab) - 1)
+        merge_pair(pretoken_counts, pair_heap, pair, len(vocab) - 1, pair2pretoken)
 
     return {i: token for i, token in enumerate(vocab)}, merges
