@@ -47,25 +47,27 @@ def pop_most_frequent_pair(
     pair_heap: LazyHeap,
     vocab: list[bytes],
 ) -> tuple[int, int]:
-    """Get the most frequent pair in the vocabulary"""
-    pair, max_count = pair_heap.pop()
-    pairs = [pair]
+    """Pop the most frequent pair in the vocabulary"""
+    max_pair, max_count = pair_heap.pop()
+    vocab_order = (vocab[max_pair[0]], vocab[max_pair[1]])
 
+    pairs_to_restore: list[tuple[int, int]] = []
     while pair_heap:
         top, top_count = pair_heap.top()
         if top_count < max_count:
             break
-        pairs.append(top)
+        if (new_order := (vocab[top[0]], vocab[top[1]])) > vocab_order:
+            pairs_to_restore.append(max_pair)
+            max_pair, vocab_order = top, new_order
+        else:
+            pairs_to_restore.append(top)
         pair_heap.pop()
 
-    if len(pairs) == 1:
-        return pairs[0]
-    else:
-        max_pair = max(pairs, key=lambda p: (vocab[p[0]], vocab[p[1]]))
-        for pair in pairs:
-            if pair != max_pair:
-                pair_heap[pair] = max_count
-        return max_pair
+    if pairs_to_restore:
+        for pair in pairs_to_restore:
+            pair_heap[pair] = max_count
+
+    return max_pair
 
 
 def merge_pair(
