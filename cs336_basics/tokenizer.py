@@ -1,6 +1,6 @@
+import json
 from typing import Iterable, Iterator
 
-import json
 import regex as re
 
 from .train_bpe import PAT
@@ -15,10 +15,16 @@ class BPETokenizer:
     ):
         self.vocab = vocab
         self.merges = merges
-        self.special_pattern = re.compile(
-            "(" + "|".join(re.escape(token) for token in self.special_tokens) + ")" if special_tokens else None
-        )
-        self.special_token_set = set(special_tokens)
+        if special_tokens:
+            # Ensure longer tokens are matched first
+            special_tokens.sort(key=len, reverse=True)
+            self.special_pattern = re.compile(
+                "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
+            )
+            self.special_token_set = set(special_tokens)
+        else:
+            self.special_pattern = None
+            self.special_token_set = set()
 
         self.encoder = {v: k for k, v in vocab.items()}
         self.ranks = {pair: i for i, pair in enumerate(merges)}
@@ -39,7 +45,9 @@ class BPETokenizer:
         with open(merges_filepath, encoding="utf-8") as f:
             lines = f.read().split("\n")
 
-        merges = [tuple(token.encode("utf-8") for token in line.split()) for line in lines]
+        merges = [
+            tuple(token.encode("utf-8") for token in line.split()) for line in lines
+        ]
 
         return cls(vocab, merges, special_tokens)
 
@@ -56,10 +64,17 @@ class BPETokenizer:
         ids = []
         for part in parts:
             if part in self.special_token_set:
-                ids.append(self.encoder(part.encode("utf-8")))
+                ids.append(self.encoder[part.encode("utf-8")])
             elif part:
-                pretokens = [bytes([b]) for match in PAT.finditer(text) for b in match.group().encode("utf-8")]
-                ids.append(self.encoder[token] for pretoken in pretokens for token in self._merge_pretoken(pretoken))
+                pretokens = [
+                    [bytes([b]) for b in match.group().encode("utf-8")]
+                    for match in PAT.finditer(part)
+                ]
+                ids.extend(
+                    self.encoder[token]
+                    for pretoken in pretokens
+                    for token in self._merge_pretoken(pretoken)
+                )
 
         return ids
 
@@ -85,7 +100,7 @@ class BPETokenizer:
         while len(pretoken) > 1:
             pair_to_merge = min(
                 zip(pretoken[:-1], pretoken[1:]),
-                key=lambda pair: self.rank.get(pair, float("inf")),
+                key=lambda pair: self.ranks.get(pair, float("inf")),
             )
 
             if pair_to_merge not in self.ranks:
@@ -94,7 +109,10 @@ class BPETokenizer:
             new_pretoken = []
             i = 0
             while i < len(pretoken):
-                if i + 1 < len(pretoken) and (pretoken[i], pretoken[i + 1]) == pair_to_merge:
+                if (
+                    i + 1 < len(pretoken)
+                    and (pretoken[i], pretoken[i + 1]) == pair_to_merge
+                ):
                     new_pretoken.append(pretoken[i] + pretoken[i + 1])
                     i += 2
                 else:

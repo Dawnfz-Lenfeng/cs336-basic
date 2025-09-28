@@ -68,9 +68,8 @@ def pop_most_frequent_pair(
             pairs_to_restore.append(top)
         pair_heap.pop()
 
-    if pairs_to_restore:
-        for pair in pairs_to_restore:
-            pair_heap[pair] = max_count
+    for pair in pairs_to_restore:
+        pair_heap[pair] = max_count
 
     return max_pair
 
