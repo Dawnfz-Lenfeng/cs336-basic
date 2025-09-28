@@ -461,7 +461,9 @@ def run_cross_entropy(
     raise NotImplementedError
 
 
-def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
+def run_gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter], max_l2_norm: float
+) -> None:
     """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
 
     Args:
@@ -598,7 +600,9 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    vocab = [bytes([i]) for i in range(256)] + [token.encode("utf-8") for token in special_tokens]
+    vocab = [bytes([i]) for i in range(256)] + [
+        token.encode("utf-8") for token in special_tokens
+    ]
     merges = []
 
     pretoken_counts = pretokenize(input_path, special_tokens)  # (token, ...) -> count

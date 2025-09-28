@@ -5,7 +5,9 @@ import regex as re
 
 from .lazy_heap import LazyHeap
 
-PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
+PAT = re.compile(
+    r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+)
 
 
 def pretokenize(
@@ -81,10 +83,15 @@ def merge_pair(
     pair2pretoken: dict[tuple[int, int], set[tuple[int, ...]]],
 ):
     """Merge a pair of tokens in the pretoken counts, updating the counts of the new and adjacent pairs"""
-    items_to_merge = [(pretoken, pretoken_counts[pretoken]) for pretoken in pair2pretoken[pair_to_merge]]
+    items_to_merge = [
+        (pretoken, pretoken_counts[pretoken])
+        for pretoken in pair2pretoken[pair_to_merge]
+    ]
 
     for pretoken, count in items_to_merge:
-        new_pretoken, pair_delta = _merge_pretoken(pretoken, count, pair_to_merge, new_token)
+        new_pretoken, pair_delta = _merge_pretoken(
+            pretoken, count, pair_to_merge, new_token
+        )
 
         del pretoken_counts[pretoken]
         # filter len(pretoken) < 2
