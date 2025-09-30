@@ -1,5 +1,5 @@
 import json
-from typing import Iterable, Iterator
+from collections.abc import Iterable, Iterator
 
 import regex as re
 
