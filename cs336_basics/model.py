@@ -2,7 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
-from einops import einsum
+from einops import einsum, reduce
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -52,3 +52,32 @@ class Embedding(nn.Module):
 
     def forward(self, token_ids: Int[Tensor, " ..."]) -> Float[Tensor, " ... d_model"]:
         return self.weight[token_ids]
+
+
+class RMSNorm(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device=None,
+        dtype: None = None,
+    ):
+        super().__init__()
+
+        self.d_model = d_model
+        self.eps = eps
+
+        self.weight: Float[Tensor, " d_model"] = nn.Parameter(
+            torch.ones(d_model, device=device, dtype=dtype)
+        )
+
+    def forward(
+        self, x: Float[Tensor, " ... d_model"]
+    ) -> Float[Tensor, " ... d_model"]:
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+
+        rms = torch.rsqrt(reduce(x.pow(2), "... d_model -> ... 1", "mean") + self.eps)
+        result = self.weight * (x * rms)
+
+        return result.to(in_dtype)
