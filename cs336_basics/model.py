@@ -81,3 +81,26 @@ class RMSNorm(nn.Module):
         result = self.weight * (x * rms)
 
         return result.to(in_dtype)
+
+
+class SwiGlu(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int,
+        device=None,
+        dtype: None = None,
+    ):
+        super().__init__()
+
+        self.d_model = d_model
+        self.d_ff = d_ff
+
+        self.w1 = Linear(d_model, d_ff)
+        self.w2 = Linear(d_ff, d_model)
+        self.w3 = Linear(d_model, d_ff)
+
+    def forward(self, x: Float[Tensor, " ... d_model"]) -> Float[Tensor, " ... d_model"]:
+        gate: Float[Tensor, " ... d_ff"] = nn.functional.silu(self.w1(x))
+
+        return self.w2(gate * self.w3(x))
