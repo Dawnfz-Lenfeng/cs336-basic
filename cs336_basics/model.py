@@ -2,7 +2,8 @@ import math
 
 import torch
 import torch.nn as nn
-from einops import einsum, reduce
+import torch.nn.functional as F
+from einops import einsum, reduce, repeat
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -59,8 +60,8 @@ class RMSNorm(nn.Module):
         self,
         d_model: int,
         eps: float = 1e-5,
-        device=None,
-        dtype: None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
 
@@ -77,8 +78,11 @@ class RMSNorm(nn.Module):
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
-        rms = torch.rsqrt(reduce(x.pow(2), "... d_model -> ... 1", "mean") + self.eps)
-        result = self.weight * (x * rms)
+        rms: Float[Tensor, " ... 1"] = (
+            reduce(x.pow(2), "... d_model -> ... 1", "mean").add(self.eps).rsqrt()
+        )
+        x_normalized: Float[Tensor, " ... d_model"] = x * rms
+        result: Float[Tensor, " ... d_model"] = self.weight * x_normalized
 
         return result.to(in_dtype)
 
@@ -88,19 +92,73 @@ class SwiGlu(nn.Module):
         self,
         d_model: int,
         d_ff: int,
-        device=None,
-        dtype: None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
         super().__init__()
 
-        self.d_model = d_model
-        self.d_ff = d_ff
+        self.w1 = Linear(d_model, d_ff, device, dtype)
+        self.w2 = Linear(d_ff, d_model, device, dtype)
+        self.w3 = Linear(d_model, d_ff, device, dtype)
 
-        self.w1 = Linear(d_model, d_ff)
-        self.w2 = Linear(d_ff, d_model)
-        self.w3 = Linear(d_model, d_ff)
+    def forward(
+        self, x: Float[Tensor, " ... d_model"]
+    ) -> Float[Tensor, " ... d_model"]:
+        gate: Float[Tensor, " ... d_ff"] = F.silu(self.w1(x))
+        filtered: Float[Tensor, " ... d_ff"] = gate * self.w3(x)
 
-    def forward(self, x: Float[Tensor, " ... d_model"]) -> Float[Tensor, " ... d_model"]:
-        gate: Float[Tensor, " ... d_ff"] = nn.functional.silu(self.w1(x))
+        return self.w2(filtered)
 
-        return self.w2(gate * self.w3(x))
+
+class RotaryPositionalEmbedding(nn.Module):
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+
+        self.theta = theta
+        self.d_k = d_k
+        self.max_seq_len = max_seq_len
+        self.device = device
+
+        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2).float() / d_k))
+        self.register_buffer("inv_freq", inv_freq.to(device))
+
+        cos, sin = self._get_cos_sin()
+        self.register_buffer("cos_cached", cos, persistent=False)
+        self.register_buffer("sin_cached", sin, persistent=False)
+
+    def forward(
+        self,
+        x: Float[Tensor, " ... seq_len d_k"],
+        token_positions: Int[Tensor, " ... seq_len"],
+    ) -> Float[Tensor, " ... seq_len d_k"]:
+        cos = self.cos_cached[token_positions]
+        sin = self.sin_cached[token_positions]
+
+        x_rotated = (x * cos) + (self.rotate_half(x) * sin)
+
+        return x_rotated
+
+    @staticmethod
+    def rotate_half(
+        x: Float[Tensor, " ... d_k"],
+    ) -> Float[Tensor, " ... d_k"]:
+        return torch.stack((-x[..., 1::2], x[..., 0::2]), dim=-1).flatten(-2)
+
+    def _get_cos_sin(
+        self
+    ) -> tuple[Float[Tensor, " max_seq_len d_k"], Float[Tensor, " max_seq_len d_k"]]:
+        positions = torch.arange(self.max_seq_len, device=self.device)
+        freqs = einsum(
+            positions,
+            self.inv_freq,
+            "max_seq_len, d_k_half -> max_seq_len d_k_half",
+        )
+        freqs = repeat(freqs, "max_seq_len d_k_half -> max_seq_len (d_k_half 2)")
+
+        return freqs.cos(), freqs.sin()
