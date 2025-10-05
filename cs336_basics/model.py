@@ -122,7 +122,7 @@ class RotaryPositionalEmbedding(nn.Module):
 
         self.register_buffer(
             "cos_sin",
-            self._get_cos_sin(theta, d_k, max_seq_len, device),
+            self._get_cos_sin(theta, d_k, max_seq_len).to(device),
             persistent=False,
         )
 
@@ -131,7 +131,7 @@ class RotaryPositionalEmbedding(nn.Module):
         x: Float[Tensor, " ... seq_len d_k"],
         token_positions: Int[Tensor, " ... seq_len"],
     ) -> Float[Tensor, " ... seq_len d_k"]:
-        cos, sin = self.cos_sin[token_positions].unbind(dim=-1)
+        cos, sin = self.cos_sin[:, token_positions]
         x_rotated = (x * cos) + (self._rotate_half(x) * sin)
 
         return x_rotated
@@ -141,17 +141,18 @@ class RotaryPositionalEmbedding(nn.Module):
         x: Float[Tensor, " ... d_k"],
     ) -> Float[Tensor, " ... d_k"]:
         x1, x2 = rearrange(x, "... (d_k_half pair) -> pair ... d_k_half", pair=2)
-        return torch.stack((-x2, x1), dim=-1).flatten(-2)
+        return rearrange(
+            torch.stack((-x2, x1), dim=-1), "... d_k_half pair -> ... (d_k_half pair)"
+        )
 
     @staticmethod
     def _get_cos_sin(
         theta: float,
         d_k: int,
         max_seq_len: int,
-        device: torch.device | None,
-    ) -> Float[Tensor, " max_seq_len d_k 2"]:
+    ) -> Float[Tensor, " 2 max_seq_len d_k"]:
         inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2).float() / d_k))
-        positions = torch.arange(max_seq_len, device=device)
+        positions = torch.arange(max_seq_len)
 
         freqs = einsum(
             positions,
@@ -160,4 +161,4 @@ class RotaryPositionalEmbedding(nn.Module):
         )
         freqs = repeat(freqs, "max_seq_len d_k_half -> max_seq_len (d_k_half 2)")
 
-        return torch.stack((freqs.cos(), freqs.sin()), dim=-1)
+        return torch.stack((freqs.cos(), freqs.sin()))
