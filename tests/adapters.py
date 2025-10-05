@@ -15,6 +15,7 @@ from cs336_basics.model import (
     RMSNorm,
     RotaryPositionalEmbedding,
     SwiGlu,
+    scaled_dot_product_attention,
     softmax,
 )
 from cs336_basics.tokenizer import BPETokenizer
@@ -45,10 +46,10 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-    model = Linear(d_in, d_out)
-    model.load_state_dict({"weight": weights})
+    linear = Linear(d_in, d_out)
+    linear.load_state_dict({"weight": weights})
 
-    return model(in_features)
+    return linear(in_features)
 
 
 def run_embedding(
@@ -69,10 +70,10 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-    model = Embedding(vocab_size, d_model)
-    model.load_state_dict({"weight": weights})
+    embedding = Embedding(vocab_size, d_model)
+    embedding.load_state_dict({"weight": weights})
 
-    return model(token_ids)
+    return embedding(token_ids)
 
 
 def run_swiglu(
@@ -124,7 +125,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(

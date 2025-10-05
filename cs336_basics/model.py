@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import einsum, rearrange, reduce, repeat
-from jaxtyping import Float, Int
+from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 
@@ -165,10 +165,29 @@ class RotaryPositionalEmbedding(nn.Module):
 
 
 def softmax(x: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
-    exp_x = torch.exp(x - x.max(dim=dim, keepdim=True).values)
+    x_max = x.max(dim=dim, keepdim=True).values
+    x_exp = torch.exp(x - x_max)
 
-    return exp_x / exp_x.sum(dim=dim, keepdim=True)
+    return x_exp / x_exp.sum(dim=dim, keepdim=True)
 
 
-def scaled_dot_product_attention():
-    pass
+def scaled_dot_product_attention(
+    Q: Float[Tensor, " ... queries d_k"],
+    K: Float[Tensor, " ... keys d_k"],
+    V: Float[Tensor, " ... keys d_v"],
+    mask: Bool[Tensor, " ... queries keys"] | None = None,
+) -> Float[Tensor, " ... queries d_v"]:
+    d_k = Q.size(-1)
+    scores = einsum(
+        Q, K, "... queries d_k, ... keys d_k -> ... queries keys"
+    ) / math.sqrt(d_k)
+
+    if mask is not None:
+        scores.masked_fill_(~mask, -1e9)
+
+    attention_weights = softmax(scores, dim=-1)
+    output = einsum(
+        attention_weights, V, "... queries keys, ... keys d_v -> ... queries d_v"
+    )
+
+    return output
