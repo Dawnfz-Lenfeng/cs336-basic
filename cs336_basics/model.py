@@ -162,3 +162,13 @@ class RotaryPositionalEmbedding(nn.Module):
         freqs = repeat(freqs, "max_seq_len d_k_half -> max_seq_len (d_k_half 2)")
 
         return torch.stack((freqs.cos(), freqs.sin()))
+
+
+def softmax(x: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
+    exp_x = torch.exp(x - x.max(dim=dim, keepdim=True).values)
+
+    return exp_x / exp_x.sum(dim=dim, keepdim=True)
+
+
+def scaled_dot_product_attention():
+    pass
