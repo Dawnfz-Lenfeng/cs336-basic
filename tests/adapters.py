@@ -17,6 +17,7 @@ from cs336_basics.model import (
     RotaryPositionalEmbedding,
     SwiGlu,
     TransformerBlock,
+    TransformerLM,
     scaled_dot_product_attention,
     softmax,
 )
@@ -102,9 +103,12 @@ def run_swiglu(
     """
     swiglu = SwiGlu(d_model, d_ff)
 
-    swiglu.w1.load_state_dict({"weight": w1_weight})
-    swiglu.w2.load_state_dict({"weight": w2_weight})
-    swiglu.w3.load_state_dict({"weight": w3_weight})
+    weights = {
+        "w1.weight": w1_weight,
+        "w2.weight": w2_weight,
+        "w3.weight": w3_weight,
+    }
+    swiglu.load_state_dict(weights)
 
     return swiglu(in_features)
 
@@ -163,10 +167,13 @@ def run_multihead_self_attention(
     """
     multihead_self_attention = MultiheadSelfAttention(d_model, num_heads)
 
-    multihead_self_attention.q_proj.load_state_dict({"weight": q_proj_weight})
-    multihead_self_attention.k_proj.load_state_dict({"weight": k_proj_weight})
-    multihead_self_attention.v_proj.load_state_dict({"weight": v_proj_weight})
-    multihead_self_attention.output_proj.load_state_dict({"weight": o_proj_weight})
+    weights = {
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "output_proj.weight": o_proj_weight,
+    }
+    multihead_self_attention.load_state_dict(weights)
 
     return multihead_self_attention(in_features)
 
@@ -215,10 +222,13 @@ def run_multihead_self_attention_with_rope(
         max_seq_len,
     )
 
-    multihead_self_attention.q_proj.load_state_dict({"weight": q_proj_weight})
-    multihead_self_attention.k_proj.load_state_dict({"weight": k_proj_weight})
-    multihead_self_attention.v_proj.load_state_dict({"weight": v_proj_weight})
-    multihead_self_attention.output_proj.load_state_dict({"weight": o_proj_weight})
+    weights = {
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "output_proj.weight": o_proj_weight,
+    }
+    multihead_self_attention.load_state_dict(weights)
 
     return multihead_self_attention(in_features, token_positions)
 
@@ -403,7 +413,19 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer_lm = TransformerLM(
+        vocab_size,
+        context_length,
+        d_model,
+        num_layers,
+        num_heads,
+        d_ff,
+        rope_theta,
+    )
+
+    transformer_lm.load_state_dict(weights)
+
+    return transformer_lm(in_indices)
 
 
 def run_rmsnorm(

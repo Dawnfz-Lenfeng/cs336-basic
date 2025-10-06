@@ -2,7 +2,6 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from einops import einsum, rearrange, reduce, repeat
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
@@ -39,19 +38,17 @@ class Linear(nn.Module):
 class Embedding(nn.Module):
     def __init__(
         self,
-        num_embeddings: int,
-        embedding_dim: int,
+        vocab_size: int,
+        d_model: int,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
 
         std = 1.0
-        self.weight: Float[Tensor, " vocab_size d_model"] = nn.Parameter(
+        self.weight = nn.Parameter(
             nn.init.trunc_normal_(
-                torch.empty(
-                    (num_embeddings, embedding_dim), device=device, dtype=dtype
-                ),
+                torch.empty((vocab_size, d_model), device=device, dtype=dtype),
                 std=std,
                 a=-3 * std,
                 b=3 * std,
@@ -90,6 +87,10 @@ class RMSNorm(nn.Module):
         return (self.weight * x * inv_rms).to(in_dtype)
 
 
+def silu(x: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
+    return x * torch.sigmoid(x)
+
+
 class SwiGlu(nn.Module):
     def __init__(
         self,
@@ -107,7 +108,7 @@ class SwiGlu(nn.Module):
     def forward(
         self, x: Float[Tensor, " ... d_model"]
     ) -> Float[Tensor, " ... d_model"]:
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
+        return self.w2(silu(self.w1(x)) * self.w3(x))
 
 
 class RotaryPositionalEmbedding(nn.Module):
@@ -274,3 +275,41 @@ class TransformerBlock(nn.Module):
         x += self.attn(self.ln1(x), token_positions)
         x += self.ffn(self.ln2(x))
         return x
+
+
+class TransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+    ):
+        super().__init__()
+
+        self.token_embeddings = Embedding(vocab_size, d_model)
+
+        self.layers = nn.ModuleList(
+            TransformerBlock(d_model, num_heads, d_ff, context_length, rope_theta)
+            for _ in range(num_layers)
+        )
+
+        self.ln_final = RMSNorm(d_model)
+        self.lm_head = Linear(d_model, vocab_size)
+
+    def forward(
+        self,
+        x: Int[Tensor, " batch seq_len"],
+    ) -> Float[Tensor, " batch seq_len vocab"]:
+        x = self.token_embeddings(x)
+
+        for block in self.layers:
+            x = block(x)
+
+        x = self.ln_final(x)
+        logits = self.lm_head(x)
+
+        return logits
