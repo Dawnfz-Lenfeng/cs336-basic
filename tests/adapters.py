@@ -12,6 +12,7 @@ from torch import Tensor
 from cs336_basics.model import (
     Embedding,
     Linear,
+    MultiheadSelfAttention,
     RMSNorm,
     RotaryPositionalEmbedding,
     SwiGlu,
@@ -131,9 +132,9 @@ def run_scaled_dot_product_attention(
 def run_multihead_self_attention(
     d_model: int,
     num_heads: int,
-    q_proj_weight: Float[Tensor, " d_k d_in"],
-    k_proj_weight: Float[Tensor, " d_k d_in"],
-    v_proj_weight: Float[Tensor, " d_v d_in"],
+    q_proj_weight: Float[Tensor, " d_model d_in"],
+    k_proj_weight: Float[Tensor, " d_model d_in"],
+    v_proj_weight: Float[Tensor, " d_model d_in"],
     o_proj_weight: Float[Tensor, " d_model d_v"],
     in_features: Float[Tensor, " ... sequence_length d_in"],
 ) -> Float[Tensor, " ... sequence_length d_out"]:
@@ -149,9 +150,9 @@ def run_multihead_self_attention(
         d_model (int): Dimensionality of the feedforward input and output.
         num_heads (int): Number of heads to use in multi-headed attention.
         max_seq_len (int): Maximum sequence length to pre-cache if your implementation does that.
-        q_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the Q projection
-        k_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the K projection
-        v_proj_weight (Float[Tensor, "d_k d_in"]): Weights for the V projection
+        q_proj_weight (Float[Tensor, "d_model d_in"]): Weights for the Q projection
+        k_proj_weight (Float[Tensor, "d_model d_in"]): Weights for the K projection
+        v_proj_weight (Float[Tensor, "d_model d_in"]): Weights for the V projection
         o_proj_weight (Float[Tensor, "d_model d_v"]): Weights for the output projection
         in_features (Float[Tensor, "... sequence_length d_in"]): Tensor to run your implementation on.
 
@@ -159,7 +160,14 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    multihead_self_attention = MultiheadSelfAttention(d_model, num_heads)
+
+    multihead_self_attention.q_proj.load_state_dict({"weight": q_proj_weight})
+    multihead_self_attention.k_proj.load_state_dict({"weight": k_proj_weight})
+    multihead_self_attention.v_proj.load_state_dict({"weight": v_proj_weight})
+    multihead_self_attention.o_proj.load_state_dict({"weight": o_proj_weight})
+
+    return multihead_self_attention(in_features)
 
 
 def run_multihead_self_attention_with_rope(

@@ -191,3 +191,63 @@ def scaled_dot_product_attention(
     )
 
     return output
+
+
+def multihead_attention(
+    Q: Float[Tensor, " ... seq_len d_model"],
+    K: Float[Tensor, " ... seq_len d_model"],
+    V: Float[Tensor, " ... seq_len d_model"],
+    num_heads: int,
+    mask: Bool[Tensor, " ... seq_len seq_len"] | None = None,
+) -> Float[Tensor, " ... seq_len d_model"]:
+    Q, K, V = map(
+        lambda x: rearrange(
+            x,
+            " ... seq_len (h d_k) -> ... h seq_len d_k",
+            h=num_heads,
+        ),
+        (Q, K, V),
+    )
+    output = scaled_dot_product_attention(Q, K, V, mask)
+
+    return rearrange(output, "... h seq_len d_k -> ... seq_len (h d_k)")
+
+
+class MultiheadSelfAttention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int):
+        super().__init__()
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        d_k = d_model // num_heads
+        self.d_k = d_k
+
+        self.q_proj = Linear(d_model, d_model)
+        self.k_proj = Linear(d_model, d_model)
+        self.v_proj = Linear(d_model, d_model)
+        self.o_proj = Linear(d_model, d_model)
+
+    def forward(
+        self, x: Float[Tensor, " ... seq_len d_model"]
+    ) -> Float[Tensor, " ... seq_len d_model"]:
+        seq_len = x.size(-2)
+        mask = torch.tril(
+            torch.ones(
+                seq_len,
+                seq_len,
+                device=x.device,
+                dtype=torch.bool,
+            )
+        )
+
+        output = self.o_proj(
+            multihead_attention(
+                self.q_proj(x),
+                self.k_proj(x),
+                self.v_proj(x),
+                self.num_heads,
+                mask,
+            )
+        )
+
+        return output
