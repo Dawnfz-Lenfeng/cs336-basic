@@ -214,21 +214,33 @@ def multihead_attention(
 
 
 class MultiheadSelfAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        theta: float | None = None,
+        max_seq_len: int | None = None,
+    ):
         super().__init__()
 
         self.d_model = d_model
         self.num_heads = num_heads
-        d_k = d_model // num_heads
-        self.d_k = d_k
+        self.d_k = d_model // num_heads
 
         self.q_proj = Linear(d_model, d_model)
         self.k_proj = Linear(d_model, d_model)
         self.v_proj = Linear(d_model, d_model)
         self.o_proj = Linear(d_model, d_model)
 
+        if theta is not None and max_seq_len is not None:
+            self.rope = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len)
+        else:
+            self.rope = None
+
     def forward(
-        self, x: Float[Tensor, " ... seq_len d_model"]
+        self,
+        x: Float[Tensor, " ... seq_len d_model"],
+        token_positions: Int[Tensor, " ... seq_len"] | None = None,
     ) -> Float[Tensor, " ... seq_len d_model"]:
         seq_len = x.size(-2)
         mask = torch.tril(
@@ -240,14 +252,17 @@ class MultiheadSelfAttention(nn.Module):
             )
         )
 
-        output = self.o_proj(
-            multihead_attention(
-                self.q_proj(x),
-                self.k_proj(x),
-                self.v_proj(x),
-                self.num_heads,
-                mask,
-            )
-        )
+        Q, K, V = self.q_proj(x), self.k_proj(x), self.v_proj(x)
 
-        return output
+        Q = rearrange(Q, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
+        K = rearrange(K, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
+        V = rearrange(V, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
+
+        if self.rope:
+            Q = self.rope(Q, token_positions)
+            K = self.rope(K, token_positions)
+
+        output = scaled_dot_product_attention(Q, K, V, mask)
+        output = rearrange(output, "... h seq_len d_k -> ... seq_len (h d_k)")
+
+        return self.o_proj(output)
