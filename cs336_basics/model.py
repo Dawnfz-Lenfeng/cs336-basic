@@ -193,26 +193,6 @@ def scaled_dot_product_attention(
     return output
 
 
-def multihead_attention(
-    Q: Float[Tensor, " ... seq_len d_model"],
-    K: Float[Tensor, " ... seq_len d_model"],
-    V: Float[Tensor, " ... seq_len d_model"],
-    num_heads: int,
-    mask: Bool[Tensor, " ... seq_len seq_len"] | None = None,
-) -> Float[Tensor, " ... seq_len d_model"]:
-    Q, K, V = map(
-        lambda x: rearrange(
-            x,
-            " ... seq_len (h d_k) -> ... h seq_len d_k",
-            h=num_heads,
-        ),
-        (Q, K, V),
-    )
-    output = scaled_dot_product_attention(Q, K, V, mask)
-
-    return rearrange(output, "... h seq_len d_k -> ... seq_len (h d_k)")
-
-
 class MultiheadSelfAttention(nn.Module):
     def __init__(
         self,
@@ -230,7 +210,7 @@ class MultiheadSelfAttention(nn.Module):
         self.q_proj = Linear(d_model, d_model)
         self.k_proj = Linear(d_model, d_model)
         self.v_proj = Linear(d_model, d_model)
-        self.o_proj = Linear(d_model, d_model)
+        self.output_proj = Linear(d_model, d_model)
 
         if theta is not None and max_seq_len is not None:
             self.rope = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len)
@@ -265,4 +245,32 @@ class MultiheadSelfAttention(nn.Module):
         output = scaled_dot_product_attention(Q, K, V, mask)
         output = rearrange(output, "... h seq_len d_k -> ... seq_len (h d_k)")
 
-        return self.o_proj(output)
+        return self.output_proj(output)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        max_seq_len: int,
+        theta: float,
+    ):
+        super().__init__()
+
+        self.attn = MultiheadSelfAttention(d_model, num_heads, theta, max_seq_len)
+        self.ln1 = RMSNorm(d_model)
+
+        self.ffn = SwiGlu(d_model, d_ff)
+        self.ln2 = RMSNorm(d_model)
+
+    def forward(
+        self, x: Float[Tensor, " batch seq_len d_model"]
+    ) -> Float[Tensor, " batch seq_len d_model"]:
+        seq_len = x.size(-2)
+        token_positions = torch.arange(seq_len, device=x.device)
+
+        x += self.attn(self.ln1(x), token_positions)
+        x += self.ffn(self.ln2(x))
+        return x
