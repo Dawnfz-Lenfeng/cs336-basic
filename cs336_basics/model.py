@@ -1,8 +1,9 @@
 import math
 
+import einx
 import torch
 import torch.nn as nn
-from einops import einsum, rearrange, reduce, repeat
+from einops import einsum, rearrange, repeat
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
@@ -82,9 +83,7 @@ class RMSNorm(nn.Module):
         in_dtype = x.dtype
         x = x.to(torch.float32)
 
-        inv_rms: Float[Tensor, " ... 1"] = (
-            reduce(x.pow(2), "... d_model -> ... 1", "mean").add(self.eps).rsqrt()
-        )
+        inv_rms = einx.mean("... [d_model]", x, keepdims=True).add(self.eps).rsqrt()
 
         return (self.weight * x * inv_rms).to(in_dtype)
 
@@ -123,48 +122,45 @@ class RotaryPositionalEmbedding(nn.Module):
     ):
         super().__init__()
 
-        self.register_buffer(
-            "cos_sin",
-            self._get_cos_sin(theta, d_k, max_seq_len).to(device),
-            persistent=False,
-        )
+        cos, sin = self._precompute_freqs(theta, d_k, max_seq_len, device)
+        self.register_buffer("cos_cached", cos, persistent=False)
+        self.register_buffer("sin_cached", sin, persistent=False)
 
     def forward(
         self,
         x: Float[Tensor, " ... seq_len d_k"],
         token_positions: Int[Tensor, " ... seq_len"],
     ) -> Float[Tensor, " ... seq_len d_k"]:
-        cos, sin = self.cos_sin[:, token_positions]
-        x_rotated = (x * cos) + (self._rotate_half(x) * sin)
+        cos = self.cos_cached[token_positions]
+        sin = self.sin_cached[token_positions]
 
-        return x_rotated
+        return (x * cos) + (self._rotate_half(x) * sin)
 
     @staticmethod
     def _rotate_half(
         x: Float[Tensor, " ... d_k"],
     ) -> Float[Tensor, " ... d_k"]:
         x1, x2 = rearrange(x, "... (d_k_half pair) -> pair ... d_k_half", pair=2)
-        return rearrange(
-            torch.stack((-x2, x1), dim=-1), "... d_k_half pair -> ... (d_k_half pair)"
+        return einx.rearrange(
+            "... d_k_half, ... d_k_half -> ... (d_k_half 1 + 1)", -x2, x1
         )
 
     @staticmethod
-    def _get_cos_sin(
+    def _precompute_freqs(
         theta: float,
         d_k: int,
         max_seq_len: int,
-    ) -> Float[Tensor, " 2 max_seq_len d_k"]:
-        inv_freq = 1.0 / (theta ** (torch.arange(0, d_k, 2).float() / d_k))
-        positions = torch.arange(max_seq_len)
-
-        freqs = einsum(
-            positions,
-            inv_freq,
-            "max_seq_len, d_k_half -> max_seq_len d_k_half",
+        device: torch.device | None = None,
+    ) -> tuple[Float[Tensor, "max_seq_len d_k"], Float[Tensor, "max_seq_len d_k"]]:
+        inv_freq = 1.0 / (
+            theta ** (torch.arange(0, d_k, 2, dtype=torch.float32, device=device) / d_k)
         )
-        freqs = repeat(freqs, "max_seq_len d_k_half -> max_seq_len (d_k_half 2)")
+        positions = torch.arange(max_seq_len, dtype=torch.float32, device=device)
 
-        return torch.stack((freqs.cos(), freqs.sin()))
+        freqs = torch.outer(positions, inv_freq)
+        freqs = repeat(freqs, "seq d_k_half -> seq (d_k_half pair)", pair=2)
+
+        return freqs.cos(), freqs.sin()
 
 
 def scaled_dot_product_attention(
