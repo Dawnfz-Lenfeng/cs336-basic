@@ -255,11 +255,11 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
 
-        self.attn = MultiheadSelfAttention(d_model, num_heads, theta, max_seq_len)
         self.ln1 = RMSNorm(d_model)
+        self.attn = MultiheadSelfAttention(d_model, num_heads, theta, max_seq_len)
 
-        self.ffn = SwiGlu(d_model, d_ff)
         self.ln2 = RMSNorm(d_model)
+        self.ffn = SwiGlu(d_model, d_ff)
 
     def forward(
         self, x: Float[Tensor, " batch seq_len d_model"]

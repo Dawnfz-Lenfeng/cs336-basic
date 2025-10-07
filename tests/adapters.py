@@ -23,6 +23,7 @@ from cs336_basics.model import (
     softmax,
 )
 from cs336_basics.nn_utils import cross_entropy
+from cs336_basics.optimizer import AdamW
 from cs336_basics.tokenizer import BPETokenizer
 from cs336_basics.train_bpe import (
     LazyHeap,
@@ -545,7 +546,7 @@ def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    return AdamW
 
 
 def run_get_lr_cosine_schedule(
