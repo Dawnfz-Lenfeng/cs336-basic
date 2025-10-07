@@ -6,6 +6,8 @@ from einops import einsum, rearrange, reduce, repeat
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
+from .nn_utils import softmax
+
 
 class Linear(nn.Module):
     def __init__(
@@ -163,13 +165,6 @@ class RotaryPositionalEmbedding(nn.Module):
         freqs = repeat(freqs, "max_seq_len d_k_half -> max_seq_len (d_k_half 2)")
 
         return torch.stack((freqs.cos(), freqs.sin()))
-
-
-def softmax(x: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
-    x_max = x.max(dim=dim, keepdim=True).values
-    x_exp = torch.exp(x - x_max)
-
-    return x_exp / x_exp.sum(dim=dim, keepdim=True)
 
 
 def scaled_dot_product_attention(
