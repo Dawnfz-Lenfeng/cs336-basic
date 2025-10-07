@@ -80,12 +80,12 @@ class RMSNorm(nn.Module):
     def forward(
         self, x: Float[Tensor, " ... d_model"]
     ) -> Float[Tensor, " ... d_model"]:
-        in_dtype = x.dtype
-        x = x.to(torch.float32)
+        output = self._norm(x.float()).type_as(x)
 
-        inv_rms = einx.mean("... [d_model]", x, keepdims=True).add(self.eps).rsqrt()
+        return self.weight * output
 
-        return (self.weight * x * inv_rms).to(in_dtype)
+    def _norm(self, x: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
+        return x * x.pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt()
 
 
 def silu(x: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
