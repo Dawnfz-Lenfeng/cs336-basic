@@ -1,5 +1,5 @@
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import torch
@@ -73,3 +73,18 @@ def get_lr_cosine_schedule(
             1 + math.cos(progress * math.pi)
         )
     return min_learning_rate
+
+
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float):
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if not grads:
+        return
+
+    total_norm = sum(grad.norm().pow(2) for grad in grads).sqrt()
+    if total_norm <= max_l2_norm:
+        return
+
+    scale_factor = max_l2_norm / (total_norm + 1e-6)
+
+    for grad in grads:
+        grad.mul_(scale_factor)
