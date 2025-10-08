@@ -9,7 +9,7 @@ import torch.optim as optim
 class AdamW(optim.Optimizer):
     def __init__(
         self,
-        params,
+        params: Iterable[torch.nn.Parameter],
         lr: float = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
@@ -31,8 +31,6 @@ class AdamW(optim.Optimizer):
                 if p.grad is None:
                     continue
 
-                grad = p.grad.data
-
                 state: dict[str, Any] = self.state[p]
                 # if state is empty dict, initialize
                 if not state:
@@ -43,19 +41,44 @@ class AdamW(optim.Optimizer):
                     )
 
                 state["t"] += 1
-                t, m, v = state["t"], state["m"], state["v"]
 
-                m.mul_(beta1).add_(grad, alpha=1 - beta1)
-                v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
-
-                bias_correction1 = 1 - beta1**t
-                bias_correction2 = 1 - beta2**t
-                step_size = lr * (bias_correction2**0.5) / bias_correction1
-
-                p.data.addcdiv_(m, v.sqrt().add_(eps), value=-step_size)
-                p.data.mul_(1 - lr * weight_decay)
+                self._update_param(
+                    p,
+                    state["m"],
+                    state["v"],
+                    state["t"],
+                    lr,
+                    beta1,
+                    beta2,
+                    eps,
+                    weight_decay,
+                )
 
         return loss
+
+    @staticmethod
+    def _update_param(
+        p: torch.nn.Parameter,
+        m: torch.Tensor,
+        v: torch.Tensor,
+        t: int,
+        lr: float,
+        beta1: float,
+        beta2: float,
+        eps: float,
+        weight_decay: float,
+    ):
+        grad = p.grad.data
+
+        m.mul_(beta1).add_(grad, alpha=1 - beta1)
+        v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+        bias_correction1 = 1 - beta1**t
+        bias_correction2 = 1 - beta2**t
+        step_size = lr * (bias_correction2**0.5) / bias_correction1
+
+        p.data.addcdiv_(m, v.sqrt().add_(eps), value=-step_size)
+        p.data.mul_(1 - lr * weight_decay)
 
 
 def get_lr_cosine_schedule(
@@ -67,11 +90,12 @@ def get_lr_cosine_schedule(
 ) -> float:
     if it < warmup_iters:
         return it / warmup_iters * max_learning_rate
+
     if it <= cosine_cycle_iters:
         progress = (it - warmup_iters) / (cosine_cycle_iters - warmup_iters)
-        return min_learning_rate + 0.5 * (max_learning_rate - min_learning_rate) * (
-            1 + math.cos(progress * math.pi)
-        )
+        cos_factor = 0.5 * (1 + math.cos(progress * math.pi))
+        return min_learning_rate + (max_learning_rate - min_learning_rate) * cos_factor
+
     return min_learning_rate
 
 
