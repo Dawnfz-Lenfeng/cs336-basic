@@ -39,7 +39,6 @@ class AdamW(optim.Optimizer):
                         m=torch.zeros_like(p.data),
                         v=torch.zeros_like(p.data),
                     )
-
                 state["t"] += 1
 
                 self._update_param(

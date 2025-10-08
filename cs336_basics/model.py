@@ -140,6 +140,7 @@ class RotaryPositionalEmbedding(nn.Module):
     def _rotate_half(
         x: Float[Tensor, " ... d_k"],
     ) -> Float[Tensor, " ... d_k"]:
+        """Rotate (x1, x2, x3, x4, ...) to (-x2, x1, -x4, x3, ...)"""
         x1, x2 = rearrange(x, "... (d_k_half pair) -> pair ... d_k_half", pair=2)
         return einx.rearrange(
             "... d_k_half, ... d_k_half -> ... (d_k_half 1 + 1)", -x2, x1
