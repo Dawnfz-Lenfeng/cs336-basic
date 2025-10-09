@@ -4,6 +4,7 @@ from typing import Any
 
 import torch
 import torch.optim as optim
+from torch.optim.lr_scheduler import LambdaLR
 
 
 class AdamW(optim.Optimizer):
@@ -96,6 +97,25 @@ def get_lr_cosine_schedule(
         return min_learning_rate + (max_learning_rate - min_learning_rate) * cos_factor
 
     return min_learning_rate
+
+
+def get_cosine_schedule_with_warmup(
+    optimizer: optim.Optimizer,
+    max_learning_rate: float,
+    min_learning_rate: float,
+    warmup_iters: int,
+    cosine_cycle_iters: int,
+) -> LambdaLR:
+    def lr_lambda(epoch: int) -> float:
+        return get_lr_cosine_schedule(
+            epoch,
+            max_learning_rate,
+            min_learning_rate,
+            warmup_iters,
+            cosine_cycle_iters,
+        )
+
+    return LambdaLR(optimizer, lr_lambda)
 
 
 def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float):
