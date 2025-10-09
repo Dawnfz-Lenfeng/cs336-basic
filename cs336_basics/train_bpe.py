@@ -1,6 +1,7 @@
 import json
 import os
 from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import BinaryIO
 
@@ -20,44 +21,16 @@ def get_gpt2_bytes_to_str() -> dict[int, str]:
     Returns a mapping between every possible byte (an integer from 0 to 255) to a
     printable unicode string character representation. This function is taken
     from the GPT-2 code.
-
-    For example, `chr(0)` is `\x00`, which is an unprintable character:
-
-    >>> chr(0)
-    '\x00'
-    >>> print(chr(0))
-
-    As a result, this function returns a dictionary `d` where `d[0]` returns `Ā`.
-    The bytes that are visually printable keep their original string representation [1].
-    For example, `chr(33)` returns `!`, and so accordingly `d[33]` returns `!`.
-    Note in particular that the space character `chr(32)` becomes `d[32]`, which
-    returns 'Ġ'.
-
-    For unprintable characters, the function shifts takes the integer representing
-    the Unicode code point of that character (returned by the Python `ord`) function
-    and shifts it by 256. For example, `ord(" ")` returns `32`, so the the space character
-    ' ' is shifted to `256 + 32`. Since `chr(256 + 32)` returns `Ġ`, we use that as the
-    string representation of the space.
-
-    This function can simplify the BPE implementation and makes it slightly easier to
-    manually inspect the generated merges after they're serialized to a file.
     """
-    # These 188 integers can used as-is, since they are not whitespace or control characters.
-    # See https://www.ssec.wisc.edu/~tomw/java/unicode.html.
     bs = (
         list(range(ord("!"), ord("~") + 1))
         + list(range(ord("¡"), ord("¬") + 1))
         + list(range(ord("®"), ord("ÿ") + 1))
     )
     cs = bs[:]
-    # now get the representations of the other 68 integers that do need shifting
-    # each will get mapped chr(256 + n), where n will grow from 0...67 in the loop
-    # Get printable representations of the remaining integers 68 integers.
     n = 0
     for b in range(2**8):
         if b not in bs:
-            # If this integer isn't in our list of visually-representable
-            # charcters, then map it to the next nice character (offset by 256)
             bs.append(b)
             cs.append(2**8 + n)
             n += 1
@@ -78,31 +51,52 @@ def gpt2_str_to_bytes(str_: str) -> bytes:
     return bytes(GPT2_STR_TO_BYTES[s] for s in str_)
 
 
+def _process_chunk(args: tuple[str, tuple[int, int], str]) -> Counter[tuple[int, ...]]:
+    input_path, (start, end), split_special_token = args
+
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+
+    parts = chunk.split(split_special_token)
+    pretokens = (
+        pretoken
+        for part in parts
+        for match in PAT.finditer(part)
+        if len(pretoken := tuple(match.group().encode("utf-8"))) >= 2
+    )
+    return Counter(pretokens)
+
+
 def pretokenize(
     input_path: str | os.PathLike,
     special_tokens: list[str],
+    max_workers: int = None,
 ) -> Counter[tuple[int, ...]]:
-    """Transform text into a list of pretokens"""
-    counter = Counter()
+    """Transform text into a list of pretokens using parallel processing"""
     split_special_token = special_tokens[0]
 
     with open(input_path, "rb") as f:
         bounds = find_chunk_bounds(f, split_special_token.encode("utf-8"))
 
-        for start, end in tqdm(
-            zip(bounds[:-1], bounds[1:]), total=len(bounds) - 1, desc="Pretokenizing"
-        ):
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            parts = chunk.split(split_special_token)
+    chunk_infos = list(zip(bounds[:-1], bounds[1:]))
+    args_list = [
+        (input_path, chunk_info, split_special_token) for chunk_info in chunk_infos
+    ]
 
-            pretokens = (
-                pretoken
-                for part in parts
-                for match in PAT.finditer(part)
-                if len(pretoken := tuple(match.group().encode("utf-8"))) >= 2
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        results = list(
+            tqdm(
+                executor.map(_process_chunk, args_list),
+                total=len(args_list),
+                desc="Pretokenizing chunks",
+                leave=False,
             )
-            counter.update(Counter(pretokens))
+        )
+
+    counter = Counter()
+    for result in results:
+        counter.update(result)
 
     return counter
 
@@ -133,8 +127,6 @@ def find_chunk_bounds(
             buffer = buffer[found_at + len(split_special_token) :]
             # not include split_special_token
             pos += found_at + len(split_special_token)
-        else:
-            pos += len(chunk)
 
     bounds.append(file_size)
     return bounds
@@ -201,37 +193,41 @@ def merge_pair(
         )
 
         del pretoken_counts[pretoken]
+        _remove_pretoken_from_pairs(pretoken, pair2pretoken)
         # filter len(pretoken) < 2
         if len(new_pretoken) >= 2:
             pretoken_counts[new_pretoken] += count
-            _update_pair2pretoken(new_pretoken, pretoken, pair2pretoken)
+            _add_pretoken_to_pairs(new_pretoken, pair2pretoken)
 
         for pair, delta_count in pair_delta:
             pair_heap[pair] += delta_count
 
 
-def _update_pair2pretoken(
-    new_pretoken: tuple[int, ...],
-    old_pretoken: tuple[int, ...],
+def _remove_pretoken_from_pairs(
+    pretoken: tuple[int, ...],
     pair2pretoken: dict[tuple[int, int], set[tuple[int, ...]]],
 ):
-    """Update pair2pretoken mapping when a pretoken is replaced"""
-    # Remove old pretoken from all its pairs
-    for pair in zip(old_pretoken[:-1], old_pretoken[1:]):
-        # A pretoken may have mutiple same pair
+    """Remove a pretoken from all its pairs in the pair2pretoken mapping"""
+    for pair in zip(pretoken[:-1], pretoken[1:]):
+        # A pretoken may have multiple same pair
         # So when one is removed from pair2pretoken, another does not need to be removed
         if pair not in pair2pretoken:
             continue
 
-        pair2pretoken[pair].discard(old_pretoken)
+        pair2pretoken[pair].discard(pretoken)
         if not pair2pretoken[pair]:  # Remove empty sets
             del pair2pretoken[pair]
 
-    # Add new pretoken to its pairs
-    for pair in zip(new_pretoken[:-1], new_pretoken[1:]):
+
+def _add_pretoken_to_pairs(
+    pretoken: tuple[int, ...],
+    pair2pretoken: dict[tuple[int, int], set[tuple[int, ...]]],
+):
+    """Add a pretoken to all its pairs in the pair2pretoken mapping"""
+    for pair in zip(pretoken[:-1], pretoken[1:]):
         if pair not in pair2pretoken:
             pair2pretoken[pair] = set()
-        pair2pretoken[pair].add(new_pretoken)
+        pair2pretoken[pair].add(pretoken)
 
 
 def _merge_pretoken(
@@ -248,11 +244,14 @@ def _merge_pretoken(
         if i + 1 < len(pretoken) and (pretoken[i], pretoken[i + 1]) == pair_to_merge:
             # left adjacent pair
             if i > 0:
-                # if left pretoken has been merged,
-                # its right adjacent pair is just current left adjacent pair
-                if new_pretoken[-1] != new_token:
+                if new_pretoken[-1] == new_token:
+                    pair_delta.append(((new_token, new_token), count))
+                    # if adjacent pairs have been merged,
+                    # left's (new_token, pretoken[i + 2]) pair has been +count wrongly
+                    pair_delta.remove(((new_token, pretoken[i]), count))
+                else:
                     pair_delta.append(((pretoken[i - 1], pretoken[i]), -count))
-                pair_delta.append(((pretoken[i - 1], new_token), count))
+                    pair_delta.append(((pretoken[i - 1], new_token), count))
 
             # right adjacent pair
             if i + 2 < len(pretoken):
@@ -273,17 +272,17 @@ def train_bpe(
     vocab_size: int,
     special_tokens: list[str],
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    vocab = [bytes([i]) for i in range(256)] + [
-        token.encode("utf-8") for token in special_tokens
-    ]
+    vocab = [bytes([i]) for i in range(256)]
     merges = []
 
     pretoken_counts = pretokenize(input_path, special_tokens)  # (token, ...) -> count
     pair_counts, pair2pretoken = pretoken2pair(pretoken_counts)
     pair_heap = LazyHeap(dict(pair_counts))
 
-    num_merges = vocab_size - len(vocab)
-    for _ in tqdm(range(num_merges), total=num_merges, desc="Merging pairs"):
+    num_merges = vocab_size - len(vocab) - len(special_tokens)
+    for _ in tqdm(
+        range(num_merges), total=num_merges, desc="Merging pairs", leave=False
+    ):
         pair = pop_most_frequent_pair(pair_heap, vocab)
         byte1, byte2 = map(lambda x: vocab[x], pair)
 
@@ -292,26 +291,27 @@ def train_bpe(
 
         merge_pair(pretoken_counts, pair_heap, pair, len(vocab) - 1, pair2pretoken)
 
+    vocab.extend(token.encode("utf-8") for token in special_tokens)
     return {i: token for i, token in enumerate(vocab)}, merges
 
 
 def save_bpe(
     vocab: dict[int, bytes],
     merges: list[tuple[bytes, bytes]],
-    save_path: str | os.PathLike,
+    save_dir: str | os.PathLike,
     gpt2_style: bool = True,
 ):
-    save_path = Path(save_path)
-    save_path.mkdir(parents=True, exist_ok=True)
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(save_path / "vocab.json", "w", encoding="utf-8") as f:
+    with open(save_dir / "vocab.json", "w", encoding="utf-8") as f:
         if gpt2_style:
             vocab = {bytes_to_gpt2_str(v): k for k, v in vocab.items()}
         else:
             vocab = {v.decode("utf-8"): k for k, v in vocab.items()}
         json.dump(vocab, f)
 
-    with open(save_path / "merges.txt", "w", encoding="utf-8") as f:
+    with open(save_dir / "merges.txt", "w", encoding="utf-8") as f:
         for merge in merges:
             if gpt2_style:
                 f.write(" ".join(bytes_to_gpt2_str(m) for m in merge) + "\n")

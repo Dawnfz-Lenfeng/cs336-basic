@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import LRScheduler
 
 from cs336_basics.data import get_batch
 from cs336_basics.model import TransformerLM
-from cs336_basics.optimizer import AdamW, get_cosine_schedule_with_warmup
+from cs336_basics.optimizer import AdamW, get_cosine_scheduler
 from scripts.config import Config
 
 
@@ -63,9 +63,7 @@ def setup_training(
         **config.optimizer.model_dump(),
     )
 
-    scheduler = get_cosine_schedule_with_warmup(
-        optimizer, **config.scheduler.model_dump()
-    )
+    scheduler = get_cosine_scheduler(optimizer, **config.scheduler.model_dump())
 
     return model, train_data, criterion, optimizer, scheduler
 
@@ -180,7 +178,7 @@ def main():
         sys.exit(1)
 
     config = load_config(sys.argv[1])
-    print(config)
+    print(config.model_dump_json(indent=2))
 
     model, train_data, criterion, optimizer, scheduler = setup_training(config)
 

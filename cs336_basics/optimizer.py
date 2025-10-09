@@ -99,7 +99,7 @@ def get_lr_cosine_schedule(
     return min_learning_rate
 
 
-def get_cosine_schedule_with_warmup(
+def get_cosine_scheduler(
     optimizer: optim.Optimizer,
     max_learning_rate: float,
     min_learning_rate: float,
