@@ -26,13 +26,7 @@ from cs336_basics.model import (
 from cs336_basics.nn_utils import cross_entropy
 from cs336_basics.optimizer import AdamW, get_lr_cosine_schedule, gradient_clipping
 from cs336_basics.tokenizer import BPETokenizer
-from cs336_basics.train_bpe import (
-    LazyHeap,
-    merge_pair,
-    pop_most_frequent_pair,
-    pretoken2pair,
-    pretokenize,
-)
+from cs336_basics.train_bpe import train_bpe
 
 
 def run_linear(
@@ -674,23 +668,4 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    vocab = [bytes([i]) for i in range(256)] + [
-        token.encode("utf-8") for token in special_tokens
-    ]
-    merges = []
-
-    pretoken_counts = pretokenize(input_path, special_tokens)  # (token, ...) -> count
-    pair_counts, pair2pretoken = pretoken2pair(pretoken_counts)
-    pair_heap = LazyHeap(dict(pair_counts))
-
-    num_merges = vocab_size - len(vocab)
-    for _ in range(num_merges):
-        pair = pop_most_frequent_pair(pair_heap, vocab)
-        byte1, byte2 = map(lambda x: vocab[x], pair)
-
-        merges.append((byte1, byte2))
-        vocab.append(byte1 + byte2)
-
-        merge_pair(pretoken_counts, pair_heap, pair, len(vocab) - 1, pair2pretoken)
-
-    return {i: token for i, token in enumerate(vocab)}, merges
+    return train_bpe(input_path, vocab_size, special_tokens)

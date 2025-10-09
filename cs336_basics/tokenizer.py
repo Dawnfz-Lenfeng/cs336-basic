@@ -3,7 +3,7 @@ from collections.abc import Iterable, Iterator
 
 import regex as re
 
-from .train_bpe import PAT
+from .train_bpe import PAT, gpt2_str_to_bytes
 
 
 class BPETokenizer:
@@ -35,19 +35,29 @@ class BPETokenizer:
         vocab_filepath: str,
         merges_filepath: str,
         special_tokens: list[str] | None = None,
+        gpt2_style: bool = True,
     ):
         """Return a Tokenizer from a serialized vocabulary
         and list of merges(in the same format that your BPE training code output)
         and (optionally) a list of special tokens."""
         with open(vocab_filepath, encoding="utf-8") as f:
-            vocab = json.load(f)
+            if gpt2_style:
+                vocab = {v: gpt2_str_to_bytes(k) for k, v in json.load(f).items()}
+            else:
+                vocab = {v: k.encode("utf-8") for k, v in json.load(f).items()}
 
         with open(merges_filepath, encoding="utf-8") as f:
             lines = f.read().split("\n")
 
-        merges = [
-            tuple(token.encode("utf-8") for token in line.split()) for line in lines
-        ]
+        if gpt2_style:
+            merges = [
+                tuple(gpt2_str_to_bytes(token) for token in line.split())
+                for line in lines
+            ]
+        else:
+            merges = [
+                tuple(token.encode("utf-8") for token in line.split()) for line in lines
+            ]
 
         return cls(vocab, merges, special_tokens)
 
