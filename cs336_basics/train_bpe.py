@@ -2,6 +2,7 @@ import json
 import os
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import BinaryIO
 
 import regex as re
 from tqdm import tqdm
@@ -11,6 +12,7 @@ from .lazy_heap import LazyHeap
 PAT = re.compile(
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 )
+CHUNK_SIZE = 10 * 1024 * 1024
 
 
 def get_gpt2_bytes_to_str() -> dict[int, str]:
@@ -81,21 +83,61 @@ def pretokenize(
     special_tokens: list[str],
 ) -> Counter[tuple[int, ...]]:
     """Transform text into a list of pretokens"""
-    with open(input_path, encoding="utf-8") as f:
-        text = f.read()
+    counter = Counter()
+    split_special_token = special_tokens[0]
 
-    if special_tokens:
-        split_pattern = "|".join(re.escape(token) for token in special_tokens)
-        parts = re.split(split_pattern, text)
-    else:
-        parts = [text]
+    with open(input_path, "rb") as f:
+        bounds = find_chunk_bounds(f, split_special_token.encode("utf-8"))
 
-    return Counter(
-        pretoken
-        for part in parts
-        for match in PAT.finditer(part)
-        if len(pretoken := tuple(match.group().encode("utf-8"))) >= 2
-    )
+        for start, end in tqdm(
+            zip(bounds[:-1], bounds[1:]), total=len(bounds) - 1, desc="Pretokenizing"
+        ):
+            f.seek(start)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            parts = chunk.split(split_special_token)
+
+            pretokens = (
+                pretoken
+                for part in parts
+                for match in PAT.finditer(part)
+                if len(pretoken := tuple(match.group().encode("utf-8"))) >= 2
+            )
+            counter.update(Counter(pretokens))
+
+    return counter
+
+
+def find_chunk_bounds(
+    file: BinaryIO,
+    split_special_token: bytes,
+) -> list[int]:
+    """Chunk the file into parts that can be counted independently"""
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    bounds = [0]
+    buffer = b""
+    pos = 0
+
+    while pos < file_size:
+        chunk = file.read(CHUNK_SIZE)
+        if not chunk:
+            break
+
+        buffer += chunk
+        found_at = buffer.rfind(split_special_token)
+
+        if found_at != -1:
+            bounds.append(pos + found_at)
+            buffer = buffer[found_at + len(split_special_token) :]
+            # not include split_special_token
+            pos += found_at + len(split_special_token)
+        else:
+            pos += len(chunk)
+
+    bounds.append(file_size)
+    return bounds
 
 
 def pretoken2pair(
@@ -241,7 +283,7 @@ def train_bpe(
     pair_heap = LazyHeap(dict(pair_counts))
 
     num_merges = vocab_size - len(vocab)
-    for _ in tqdm(range(num_merges)):
+    for _ in tqdm(range(num_merges), total=num_merges, desc="Merging pairs"):
         pair = pop_most_frequent_pair(pair_heap, vocab)
         byte1, byte2 = map(lambda x: vocab[x], pair)
 
