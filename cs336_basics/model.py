@@ -176,7 +176,7 @@ def scaled_dot_product_attention(
     ) / math.sqrt(d_k)
 
     if mask is not None:
-        scores.masked_fill_(~mask, -1e9)
+        scores = scores.masked_fill(~mask, -1e9)
 
     attention_weights = softmax(scores, dim=-1)
     output = einsum(
@@ -264,8 +264,8 @@ class TransformerBlock(nn.Module):
         seq_len = x.size(-2)
         token_positions = torch.arange(seq_len, device=x.device)
 
-        x += self.attn(self.ln1(x), token_positions)
-        x += self.ffn(self.ln2(x))
+        x = x + self.attn(self.ln1(x), token_positions)
+        x = x + self.ffn(self.ln2(x))
         return x
 
 

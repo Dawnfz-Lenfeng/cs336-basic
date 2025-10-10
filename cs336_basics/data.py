@@ -94,8 +94,8 @@ class DataLoader:
             y = self.dataset[indices + 1]
 
             yield (
-                torch.from_numpy(x).to(self.device),
-                torch.from_numpy(y).to(self.device),
+                torch.from_numpy(x).to(self.device, dtype=torch.long),
+                torch.from_numpy(y).to(self.device, dtype=torch.long),
             )
 
     def __len__(self):

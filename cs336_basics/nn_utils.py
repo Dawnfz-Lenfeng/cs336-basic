@@ -19,10 +19,10 @@ def log_softmax(x: Float[Tensor, " ..."], dim: int = -1) -> Float[Tensor, " ..."
 
 
 def cross_entropy(
-    inputs: Float[Tensor, " batch vocab_size"],
-    targets: Int[Tensor, " batch"],
+    inputs: Float[Tensor, " ... seq_len vocab_size"],
+    targets: Int[Tensor, " ... seq_len"],
 ) -> Float[Tensor, ""]:
     log_probs = log_softmax(inputs)
-    loss = -einx.get_at("batch [vocab], batch -> batch", log_probs, targets)
+    loss = -einx.get_at("... seq_len [vocab], ... seq_len -> ... seq_len", log_probs, targets)
 
     return loss.mean()
