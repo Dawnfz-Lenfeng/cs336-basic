@@ -1,5 +1,6 @@
 import os
 import typing
+from collections.abc import Iterator
 
 import numpy as np
 import numpy.typing as npt
@@ -9,7 +10,7 @@ from torch import Tensor
 
 
 def get_batch(
-    dataset: npt.NDArray[np.long],
+    dataset: npt.NDArray[np.uint16],
     batch_size: int,
     context_length: int,
     device: str,
@@ -51,3 +52,49 @@ def load_checkpoint(
     optimizer.load_state_dict(checkpoint["optim_state"])
 
     return checkpoint["iteration"]
+
+
+class DataLoader:
+    def __init__(
+        self,
+        dataset: npt.NDArray[np.uint16],
+        batch_size: int,
+        context_length: int,
+        device: str,
+        shuffle=True,
+    ) -> None:
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.context_length = context_length
+        self.device = device
+        self.shuffle = shuffle
+
+        self.total_tokens = len(dataset)
+        self.tokens_per_batch = batch_size * context_length
+        self.num_batches = (self.total_tokens - 1) // self.tokens_per_batch
+
+    def __iter__(
+        self,
+    ) -> Iterator[tuple[Int[Tensor, " batch cxt_len"], Int[Tensor, " batch cxt_len"]]]:
+        max_start = self.total_tokens - self.context_length - 1
+        all_starts = np.arange(0, max_start, self.context_length)
+
+        if self.shuffle:
+            np.random.shuffle(all_starts)
+
+        for i in range(0, len(all_starts), self.batch_size):
+            batch_starts = all_starts[i : i + self.batch_size]
+            if len(batch_starts) < self.batch_size:
+                break
+
+            indices = np.add.outer(batch_starts, np.arange(self.context_length))
+            x = self.dataset[indices]
+            y = self.dataset[indices + 1]
+
+            yield (
+                torch.from_numpy(x).to(self.device),
+                torch.from_numpy(y).to(self.device),
+            )
+
+    def __len__(self):
+        return self.num_batches

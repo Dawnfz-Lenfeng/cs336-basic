@@ -1,16 +1,16 @@
 import sys
 
 import numpy as np
+import numpy.typing as npt
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import yaml
-from jaxtyping import Float
-from torch import Tensor
+from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
-from cs336_basics.data import get_batch
+from cs336_basics.data import DataLoader
 from cs336_basics.model import TransformerLM
+from cs336_basics.nn_utils import cross_entropy
 from cs336_basics.optimizer import AdamW, get_cosine_scheduler
 from scripts.config import Config
 
@@ -22,31 +22,15 @@ def load_config(config_path: str) -> Config:
     return Config.model_validate(data)
 
 
-def load_data(data_path: str, dtype=np.uint16) -> np.memmap:
-    """
-    Load data using memory-mapped file for memory efficiency.
-
-    Args:
-        data_path: Path to the binary data file
-        dtype: Data type of the tokens (default: np.uint16)
-
-    Returns:
-        Memory-mapped array of token IDs
-    """
+def load_data(data_path: str, dtype=np.uint16) -> npt.NDArray[np.uint16]:
     return np.memmap(data_path, dtype=dtype, mode="r")
 
 
 def setup_training(
     config: Config,
-) -> tuple[
-    TransformerLM,
-    np.memmap,
-    nn.Module,
-    optim.Optimizer,
-    LRScheduler,
-]:
+) -> tuple[TransformerLM, DataLoader, Optimizer, LRScheduler]:
     dataset = load_data(config.data.data_path)
-    train_data = get_batch(
+    data_loader = DataLoader(
         dataset,
         config.training.batch_size,
         config.model.context_length,
@@ -54,8 +38,6 @@ def setup_training(
     )
 
     model = TransformerLM(**config.model.model_dump()).to(config.training.device)
-
-    criterion = nn.CrossEntropyLoss()
 
     optimizer = AdamW(
         model.parameters(),
@@ -65,7 +47,7 @@ def setup_training(
 
     scheduler = get_cosine_scheduler(optimizer, **config.scheduler.model_dump())
 
-    return model, train_data, criterion, optimizer, scheduler
+    return model, data_loader, optimizer, scheduler
 
 
 @torch.no_grad()
@@ -136,16 +118,16 @@ def log_metrics(
 
 
 def train_epoch(
-    model: TransformerLM,
-    train_loader: Float[Tensor, " batch cxt_len"],
-    criterion: nn.Module,
-    optimizer: AdamW,
+    model: nn.Module,
+    data_loader: DataLoader,
+    optimizer: Optimizer,
 ) -> float:
-    for data, targets in train_loader:
-        outputs = model(data)
-        loss = criterion(outputs, targets)
-
+    for data, targets in data_loader:
         optimizer.zero_grad()
+
+        outputs = model(data)
+        loss = cross_entropy(outputs, targets)
+
         loss.backward()
         optimizer.step()
 
@@ -154,15 +136,14 @@ def train_epoch(
 
 def train(
     model: nn.Module,
-    train_loader,
-    criterion: nn.Module,
-    optimizer: optim.Optimizer,
-    scheduler: optim.lr_scheduler.LRScheduler,
+    data_loader: DataLoader,
+    optimizer: Optimizer,
+    scheduler: LRScheduler,
     num_epochs: int,
     save_interval: int,
 ):
     for epoch in range(num_epochs):
-        loss = train_epoch(model, train_loader, criterion, optimizer)
+        loss = train_epoch(model, data_loader, optimizer)
         scheduler.step()
 
         log_metrics(epoch, loss, scheduler.get_last_lr()[0])
@@ -180,12 +161,11 @@ def main():
     config = load_config(sys.argv[1])
     print(config.model_dump_json(indent=2))
 
-    model, train_data, criterion, optimizer, scheduler = setup_training(config)
+    model, data_loader, optimizer, scheduler = setup_training(config)
 
     train(
         model,
-        train_data,
-        criterion,
+        data_loader,
         optimizer,
         scheduler,
         config.training.num_epochs,
