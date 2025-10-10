@@ -13,7 +13,6 @@ from .lazy_heap import LazyHeap
 PAT = re.compile(
     r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 )
-CHUNK_SIZE = 10 * 1024 * 1024
 
 
 def get_gpt2_bytes_to_str() -> dict[int, str]:
@@ -79,9 +78,9 @@ def pretokenize(
     with open(input_path, "rb") as f:
         bounds = find_chunk_bounds(f, split_special_token.encode("utf-8"))
 
-    chunk_infos = list(zip(bounds[:-1], bounds[1:]))
     args_list = [
-        (input_path, chunk_info, split_special_token) for chunk_info in chunk_infos
+        (input_path, chunk, split_special_token)
+        for chunk in zip(bounds[:-1], bounds[1:])
     ]
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -104,6 +103,8 @@ def pretokenize(
 def find_chunk_bounds(
     file: BinaryIO,
     split_special_token: bytes,
+    chunk_size: int = 5 * 1024 * 1024,
+    include_split_special_token: bool = False,
 ) -> list[int]:
     """Chunk the file into parts that can be counted independently"""
     file.seek(0, os.SEEK_END)
@@ -115,7 +116,7 @@ def find_chunk_bounds(
     pos = 0
 
     while pos < file_size:
-        chunk = file.read(CHUNK_SIZE)
+        chunk = file.read(chunk_size)
         if not chunk:
             break
 
@@ -123,10 +124,12 @@ def find_chunk_bounds(
         found_at = buffer.rfind(split_special_token)
 
         if found_at != -1:
-            bounds.append(pos + found_at)
-            buffer = buffer[found_at + len(split_special_token) :]
-            # not include split_special_token
             pos += found_at + len(split_special_token)
+            if not include_split_special_token:
+                bounds.append(pos - len(split_special_token))
+            else:
+                bounds.append(pos)
+            buffer = buffer[found_at + len(split_special_token) :]
 
     bounds.append(file_size)
     return bounds

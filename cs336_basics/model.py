@@ -259,8 +259,8 @@ class TransformerBlock(nn.Module):
         self.ffn = SwiGlu(d_model, d_ff)
 
     def forward(
-        self, x: Float[Tensor, " batch seq_len d_model"]
-    ) -> Float[Tensor, " batch seq_len d_model"]:
+        self, x: Float[Tensor, " ... seq_len d_model"]
+    ) -> Float[Tensor, " ... seq_len d_model"]:
         seq_len = x.size(-2)
         token_positions = torch.arange(seq_len, device=x.device)
 
@@ -294,8 +294,8 @@ class TransformerLM(nn.Module):
 
     def forward(
         self,
-        x: Int[Tensor, " batch seq_len"],
-    ) -> Float[Tensor, " batch seq_len vocab"]:
+        x: Int[Tensor, " ... seq_len"],
+    ) -> Float[Tensor, " ... seq_len vocab"]:
         x = self.token_embeddings(x)
 
         for block in self.layers:
@@ -309,14 +309,12 @@ class TransformerLM(nn.Module):
     @torch.no_grad()
     def generate(
         self,
-        input_ids: Int[Tensor, " batch seq_len"] | Int[Tensor, " seq_len"],
+        input_ids: Int[Tensor, " ... seq_len"],
         max_tokens: int = 100,
         temperature: float | None = None,
         top_p: float | None = None,
         eos_token_id: int | None = None,
-    ) -> (
-        Int[Tensor, " batch total_len"] | Int[Tensor, " total_len"]
-    ):
+    ) -> Int[Tensor, " ... total_len"]:
         """
         Generate text from the model.
 
