@@ -305,3 +305,78 @@ class TransformerLM(nn.Module):
         logits = self.lm_head(x)
 
         return logits
+
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: Int[Tensor, " batch seq_len"] | Int[Tensor, " seq_len"],
+        max_tokens: int = 100,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        eos_token_id: int | None = None,
+    ) -> (
+        Int[Tensor, " batch total_len"] | Int[Tensor, " total_len"]
+    ):
+        """
+        Generate text from the model.
+
+        Supports temperature scaling, top-p (nucleus) sampling, and early stopping
+        with end-of-sequence tokens.
+
+        Args:
+            input_ids: Input token IDs. Can be a single sequence [seq_len] or
+                      a batch of sequences [batch, seq_len]
+            max_tokens: Maximum number of tokens to generate
+            temperature: Temperature for softmax scaling (default: 1.0, no scaling)
+            top_p: Threshold for nucleus sampling (default: 1.0, no filtering)
+            eos_token_id: End-of-sequence token ID. If provided, generation stops
+                         when this token is generated for each sequence
+
+        Returns:
+            Generated token IDs. If input was a batch, returns [batch, total_len]
+            where total_len = input_len + generated_len. If input was a single
+            sequence, returns [total_len].
+        """
+
+        batch_size = input_ids.size(0) if input_ids.dim() > 1 else 1
+        finished = torch.zeros(batch_size, dtype=torch.bool, device=input_ids.device)
+
+        for _ in range(max_tokens):
+            logits = self.forward(input_ids)
+            next_token_logits = logits[..., -1, :]
+
+            if temperature is not None:
+                next_token_logits.div_(temperature)
+
+            probs = softmax(next_token_logits)
+            if top_p is not None:
+                self._top_p_mask(probs, top_p)
+
+            next_token = torch.multinomial(probs, num_samples=1)
+
+            if eos_token_id is not None:
+                finished |= next_token.squeeze(-1) == eos_token_id
+                next_token[finished] = eos_token_id
+
+            input_ids = torch.cat((input_ids, next_token), dim=-1)
+
+            if eos_token_id is not None and finished.all():
+                break
+
+        return input_ids
+
+    @staticmethod
+    def _top_p_mask(probs: Float[Tensor, "... vocab"], top_p: float):
+        sorted_probs, sorted_indices = probs.sort(descending=True)
+        cumulative_probs = sorted_probs.cumsum(-1)
+
+        sorted_mask = cumulative_probs >= top_p
+        # Shift right to keep the first token that crosses threshold
+        sorted_mask[..., 1:] = sorted_mask[..., :-1].clone()
+        sorted_mask[..., 0] = False
+
+        # Map back to original order using scatter
+        mask = torch.zeros_like(probs, dtype=torch.bool)
+        mask.scatter_(dim=-1, index=sorted_indices, src=sorted_mask)
+
+        probs.masked_fill_(mask, 0.0)
