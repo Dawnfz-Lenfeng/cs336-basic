@@ -1,14 +1,15 @@
+import os
 import sys
 
 import numpy as np
 import numpy.typing as npt
-import torch
 import torch.nn as nn
 import yaml
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
-from cs336_basics.data import DataLoader
+import wandb
+from cs336_basics.data import DataLoader, load_checkpoint, save_checkpoint
 from cs336_basics.model import TransformerLM
 from cs336_basics.nn_utils import cross_entropy
 from cs336_basics.optimizer import AdamW, get_cosine_scheduler
@@ -28,7 +29,7 @@ def load_data(data_path: str, dtype=np.uint16) -> npt.NDArray[np.uint16]:
 
 def setup_training(
     config: Config,
-) -> tuple[TransformerLM, DataLoader, Optimizer, LRScheduler]:
+) -> tuple[TransformerLM, DataLoader, Optimizer, LRScheduler, int]:
     dataset = load_data(config.data.data_path)
     data_loader = DataLoader(
         dataset,
@@ -38,90 +39,37 @@ def setup_training(
     )
 
     model = TransformerLM(**config.model.model_dump()).to(config.training.device)
-
     optimizer = AdamW(
         model.parameters(),
         lr=config.scheduler.max_learning_rate,
         **config.optimizer.model_dump(),
     )
-
     scheduler = get_cosine_scheduler(optimizer, **config.scheduler.model_dump())
 
-    return model, data_loader, optimizer, scheduler
+    resume_epoch = 0
+    if config.training.resume_from is not None:
+        resume_epoch = load_checkpoint(
+            config.training.resume_from,
+            model,
+            optimizer,
+            scheduler,
+        )
+        # resume from next epoch
+        resume_epoch += 1
 
-
-@torch.no_grad()
-def estimate_loss(
-    model: TransformerLM,
-    train_data: np.memmap,
-    val_data: np.memmap,
-) -> dict[str, float]:
-    """
-    Estimate loss on training and validation sets.
-
-    This function should:
-    1. Set the model to evaluation mode
-    2. Run multiple iterations on train and val data
-    3. Compute average loss for each split
-    4. Restore model to training mode
-
-    Args:
-        model: The language model
-        train_data: Memory-mapped training data
-        val_data: Memory-mapped validation data
-        args: Parsed arguments containing batch_size, context_length, eval_iters, etc.
-
-    Returns:
-        Dictionary containing 'train' and 'val' loss values
-    """
-    pass
-
-
-def save_checkpoint_with_metadata(
-    model: TransformerLM,
-    optimizer: AdamW,
-    epoch: int,
-    checkpoint_name: str = "checkpoint.pt",
-):
-    """
-    Save a checkpoint with model, optimizer state, and metadata.
-
-    Args:
-        model: The language model
-        optimizer: The optimizer
-        epoch: Current epoch number
-        args: Training configuration arguments
-        checkpoint_name: Name of the checkpoint file
-    """
-    pass
-
-
-def log_metrics(
-    epoch: int,
-    loss: float,
-    learning_rate: float,
-    is_eval: bool = False,
-    eval_losses: dict[str, float] | None = None,
-):
-    """
-    Log training metrics to console and optionally to Weights & Biases.
-
-    Args:
-        epoch: Current epoch number
-        loss: Training loss value
-        learning_rate: Current learning rate
-        args: Training configuration arguments
-        is_eval: Whether this is an evaluation step
-        eval_losses: Dictionary of evaluation losses (train/val) if is_eval is True
-    """
-    pass
+    return model, data_loader, optimizer, scheduler, resume_epoch
 
 
 def train_epoch(
     model: nn.Module,
     data_loader: DataLoader,
     optimizer: Optimizer,
+    epoch: int,
+    log_interval: int,
 ) -> float:
+    total_loss = 0.0
+    step = 0
+
     for data, targets in data_loader:
         optimizer.zero_grad()
 
@@ -131,7 +79,18 @@ def train_epoch(
         loss.backward()
         optimizer.step()
 
-    return loss.item()
+        total_loss += loss.item()
+        step += 1
+
+        if wandb.run is not None and step % log_interval == 0:
+            wandb.log(
+                {
+                    "train/loss": loss.item(),
+                    "train/step": epoch * len(data_loader) + step,
+                }
+            )
+
+    return total_loss / step if step > 0 else 0.0
 
 
 def train(
@@ -141,16 +100,37 @@ def train(
     scheduler: LRScheduler,
     num_epochs: int,
     save_interval: int,
+    log_interval: int,
+    resume_epoch: int,
+    save_dir: str,
 ):
-    for epoch in range(num_epochs):
-        loss = train_epoch(model, data_loader, optimizer)
+    os.makedirs(save_dir, exist_ok=True)
+
+    for epoch in range(resume_epoch, num_epochs):
+        avg_loss = train_epoch(model, data_loader, optimizer, epoch, log_interval)
         scheduler.step()
+        lr = scheduler.get_last_lr()[0]
 
-        log_metrics(epoch, loss, scheduler.get_last_lr()[0])
-        if epoch % save_interval == 0:
-            save_checkpoint_with_metadata(model, optimizer, epoch)
+        if wandb.run is not None:
+            wandb.log(
+                {
+                    "train/epoch_loss": avg_loss,
+                    "train/learning_rate": lr,
+                    "train/epoch": epoch,
+                }
+            )
 
-    save_checkpoint_with_metadata(model, optimizer, num_epochs)
+        print(f"Epoch {epoch}/{num_epochs}, Loss: {avg_loss:.4f}, LR: {lr:.6f}")
+
+        if (epoch + 1) % save_interval == 0 or epoch == num_epochs - 1:
+            checkpoint_name = (
+                f"checkpoint_{epoch}.pt"
+                if epoch != num_epochs - 1
+                else "checkpoint_final.pt"
+            )
+            checkpoint_path = os.path.join(save_dir, checkpoint_name)
+            save_checkpoint(model, optimizer, scheduler, epoch, checkpoint_path)
+            print(f"Saved checkpoint to {checkpoint_path}")
 
 
 def main():
@@ -161,7 +141,17 @@ def main():
     config = load_config(sys.argv[1])
     print(config.model_dump_json(indent=2))
 
-    model, data_loader, optimizer, scheduler = setup_training(config)
+    # initialize wandb
+    if config.wandb.enabled:
+        wandb.init(
+            project=config.wandb.project,
+            entity=config.wandb.entity,
+            name=config.wandb.name,
+            tags=config.wandb.tags,
+            config=config.model_dump(),
+        )
+
+    model, data_loader, optimizer, scheduler, resume_epoch = setup_training(config)
 
     train(
         model,
@@ -170,7 +160,14 @@ def main():
         scheduler,
         config.training.num_epochs,
         config.training.save_interval,
+        config.training.log_interval,
+        resume_epoch,
+        config.training.save_dir,
     )
+
+    # finish wandb run
+    if wandb.run is not None:
+        wandb.finish()
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ def parse_args():
         "--output",
         type=str,
         default="data/TinyStoriesV2-GPT4-train.dat",
-        help="Output numpy file",
+        help="Output binary file",
     )
     parser.add_argument(
         "--vocab",
@@ -87,19 +87,7 @@ def tokenize_file(
     chunk_size: int = 5 * 1024 * 1024,
     max_workers: int | None = None,
 ):
-    """
-    Tokenize a text file and save as numpy array using parallel processing.
-    Uses memory-mapped files to avoid loading all tokens into memory at once.
-
-    Args:
-        input_path: Path to input text file
-        output_path: Path to output numpy file (.npy)
-        vocab_path: Path to BPE vocabulary file
-        merges_path: Path to BPE merges file
-        special_tokens: Optional list of special tokens
-        chunk_size: Size of text chunks to process at once
-        max_workers: Maximum number of worker processes (default: CPU count)
-    """
+    """Tokenize a text file and save as binary file using parallel processing."""
     file_size = Path(input_path).stat().st_size
     print(f"Processing {input_path} ({file_size / 1024 / 1024:.2f} MB)")
 

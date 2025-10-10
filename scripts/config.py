@@ -35,6 +35,15 @@ class TrainingConfig(BaseModel):
     log_interval: int
     save_interval: int
     save_dir: str = "checkpoints"
+    resume_from: str | None = None
+
+
+class WandbConfig(BaseModel):
+    enabled: bool = True
+    project: str = "cs336-basic"
+    entity: str | None = None
+    name: str | None = None
+    tags: list[str] = []
 
 
 class Config(BaseModel):
@@ -43,3 +52,4 @@ class Config(BaseModel):
     model: ModelConfig
     optimizer: OptimizerConfig
     scheduler: SchedulerConfig
+    wandb: WandbConfig = WandbConfig()
