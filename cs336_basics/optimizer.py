@@ -107,13 +107,14 @@ def get_cosine_scheduler(
     cosine_cycle_iters: int,
 ) -> LambdaLR:
     def lr_lambda(epoch: int) -> float:
-        return get_lr_cosine_schedule(
+        curr_lr = get_lr_cosine_schedule(
             epoch,
             max_learning_rate,
             min_learning_rate,
             warmup_iters,
             cosine_cycle_iters,
         )
+        return curr_lr / max_learning_rate
 
     return LambdaLR(optimizer, lr_lambda)
 
