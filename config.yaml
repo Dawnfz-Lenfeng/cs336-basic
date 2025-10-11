@@ -1,0 +1,38 @@
+data:
+  data_path: "data/TinyStoriesV2-GPT4-train.dat"
+
+training:
+  device: "cuda"
+  batch_size: 32
+  num_steps: 40000
+  log_interval: 10
+  save_interval: 100
+  save_dir: "checkpoints"
+  resume_from: null
+
+model:
+  vocab_size: 10000
+  context_length: 256
+  d_model: 512
+  d_ff: 1344
+  rope_theta: 10000
+  num_layers: 4
+  num_heads: 16
+
+optimizer:
+  betas: [0.99, 0.999]
+  eps: 1e-8
+  weight_decay: 0.01
+
+scheduler:
+  max_learning_rate: 1e-3
+  min_learning_rate: 1e-4
+  warmup_iters: 1000
+  cosine_cycle_iters: 8000
+
+wandb:
+  enabled: true
+  project: "cs336-basic"
+  entity: null
+  name: null
+  tags: []
