@@ -29,9 +29,23 @@ def load_data(data_path: str, dtype=np.uint16) -> npt.NDArray[np.uint16]:
     return np.memmap(data_path, dtype=dtype, mode="r")
 
 
+def save_checkpoint_with_name(
+    model: nn.Module,
+    optimizer: Optimizer,
+    scheduler: LRScheduler,
+    step: int,
+    save_dir: Path,
+    name: str,
+    wandb_run_id: str | None = None,
+):
+    checkpoint_path = save_dir / name
+    save_checkpoint(checkpoint_path, model, optimizer, scheduler, step, wandb_run_id)
+    print(f"Saved checkpoint to {checkpoint_path}")
+
+
 def setup_training(
     config: Config,
-) -> tuple[TransformerLM, DataLoader, Optimizer, LRScheduler, int]:
+) -> tuple[TransformerLM, DataLoader, Optimizer, LRScheduler, int, str | None]:
     dataset = load_data(config.data.data_path)
     data_loader = DataLoader(
         dataset,
@@ -49,17 +63,18 @@ def setup_training(
     scheduler = get_cosine_scheduler(optimizer, **config.scheduler.model_dump())
 
     resume_step = 1
+    wandb_run_id = None
     if config.training.resume_from is not None:
-        resume_step = load_checkpoint(
+        resume_step, wandb_run_id = load_checkpoint(
             config.training.resume_from,
             model,
             optimizer,
             scheduler,
         )
-        # resume from next epoch
+        # resume from next step
         resume_step += 1
 
-    return model, data_loader, optimizer, scheduler, resume_step
+    return model, data_loader, optimizer, scheduler, resume_step, wandb_run_id
 
 
 def train_step(
@@ -96,6 +111,8 @@ def train(
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
+    wandb_run_id = wandb.run.id if wandb.run is not None else None
+
     for step, (data, targets) in enumerate(data_loader, start=resume_step):
         loss, lr = train_step(model, data, targets, optimizer, scheduler)
 
@@ -112,16 +129,28 @@ def train(
 
         if step == num_steps:
             checkpoint_name = "checkpoint_final.pt"
-            checkpoint_path = save_dir / checkpoint_name
-            save_checkpoint(model, optimizer, scheduler, step, checkpoint_path)
-            print(f"Saved checkpoint to {checkpoint_path}")
+            save_checkpoint_with_name(
+                model,
+                optimizer,
+                scheduler,
+                step,
+                save_dir,
+                checkpoint_name,
+                wandb_run_id,
+            )
             break
 
         if step % save_interval == 0:
             checkpoint_name = f"checkpoint_{step}.pt"
-            checkpoint_path = save_dir / checkpoint_name
-            save_checkpoint(model, optimizer, scheduler, step, checkpoint_path)
-            print(f"Saved checkpoint to {checkpoint_path}")
+            save_checkpoint_with_name(
+                model,
+                optimizer,
+                scheduler,
+                step,
+                save_dir,
+                checkpoint_name,
+                wandb_run_id,
+            )
 
 
 def main():
@@ -132,17 +161,31 @@ def main():
     config = load_config(sys.argv[1])
     print(config.model_dump_json(indent=2))
 
+    model, data_loader, optimizer, scheduler, resume_step, wandb_run_id = (
+        setup_training(config)
+    )
+
     # initialize wandb
     if config.wandb.enabled:
-        wandb.init(
-            project=config.wandb.project,
-            entity=config.wandb.entity,
-            name=config.wandb.name,
-            tags=config.wandb.tags,
-            config=config.model_dump(),
-        )
-
-    model, data_loader, optimizer, scheduler, resume_step = setup_training(config)
+        if wandb_run_id is not None:
+            # resume existing wandb run
+            print(f"Resuming wandb run with id: {wandb_run_id}")
+            wandb.init(
+                project=config.wandb.project,
+                entity=config.wandb.entity,
+                id=wandb_run_id,
+                resume="must",
+                config=config.model_dump(),
+            )
+        else:
+            # start new wandb run
+            wandb.init(
+                project=config.wandb.project,
+                entity=config.wandb.entity,
+                name=config.wandb.name,
+                tags=config.wandb.tags,
+                config=config.model_dump(),
+            )
 
     train(
         model,

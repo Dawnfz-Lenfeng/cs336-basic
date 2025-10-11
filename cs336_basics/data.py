@@ -27,17 +27,19 @@ def get_batch(
 
 
 def save_checkpoint(
+    out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     iteration: int,
-    out: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
+    wandb_run_id: str | None = None,
 ):
     checkpoint = dict(
         model_state=model.state_dict(),
         optim_state=optimizer.state_dict(),
         iteration=iteration,
         scheduler_state=scheduler.state_dict(),
+        wandb_run_id=wandb_run_id,
     )
 
     torch.save(checkpoint, out)
@@ -48,14 +50,14 @@ def load_checkpoint(
     model: torch.nn.Module,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
-) -> int:
+) -> tuple[int, str | None]:
     checkpoint = torch.load(src)
 
     model.load_state_dict(checkpoint["model_state"])
     optimizer.load_state_dict(checkpoint["optim_state"])
     scheduler.load_state_dict(checkpoint["scheduler_state"])
 
-    return checkpoint["iteration"]
+    return checkpoint["iteration"], checkpoint.get("wandb_run_id", None)
 
 
 class DataLoader:
