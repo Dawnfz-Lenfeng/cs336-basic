@@ -31,7 +31,7 @@ class SchedulerConfig(BaseModel):
 class TrainingConfig(BaseModel):
     device: str
     batch_size: int
-    num_epochs: int
+    num_steps: int
     log_interval: int
     save_interval: int
     save_dir: str = "checkpoints"

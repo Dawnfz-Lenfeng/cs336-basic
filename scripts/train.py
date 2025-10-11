@@ -1,10 +1,12 @@
-import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 import torch.nn as nn
 import yaml
+from jaxtyping import Int
+from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
@@ -24,7 +26,7 @@ def load_config(config_path: str) -> Config:
 
 
 def load_data(data_path: str, dtype=np.uint16) -> npt.NDArray[np.uint16]:
-    return np.memmap(data_path, dtype=dtype, mode="r")[0:100000]
+    return np.memmap(data_path, dtype=dtype, mode="r")
 
 
 def setup_training(
@@ -46,53 +48,38 @@ def setup_training(
     )
     scheduler = get_cosine_scheduler(optimizer, **config.scheduler.model_dump())
 
-    resume_epoch = 0
+    resume_step = 1
     if config.training.resume_from is not None:
-        resume_epoch = load_checkpoint(
+        resume_step = load_checkpoint(
             config.training.resume_from,
             model,
             optimizer,
             scheduler,
         )
         # resume from next epoch
-        resume_epoch += 1
+        resume_step += 1
 
-    return model, data_loader, optimizer, scheduler, resume_epoch
+    return model, data_loader, optimizer, scheduler, resume_step
 
 
-def train_epoch(
+def train_step(
     model: nn.Module,
-    data_loader: DataLoader,
+    data: Int[Tensor, " batch cxt_len"],
+    targets: Int[Tensor, " batch cxt_len"],
     optimizer: Optimizer,
     scheduler: LRScheduler,
-    epoch: int,
-    log_interval: int,
 ) -> float:
-    total_loss = 0.0
+    optimizer.zero_grad()
 
-    for step, (data, targets) in enumerate(data_loader, start=1):
-        optimizer.zero_grad()
+    outputs = model(data)
+    loss = cross_entropy(outputs, targets)
 
-        outputs = model(data)
-        loss = cross_entropy(outputs, targets)
+    loss.backward()
+    optimizer.step()
+    scheduler.step()
+    lr = scheduler.get_last_lr()[0]
 
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
-        lr = scheduler.get_last_lr()[0]
-
-        total_loss += loss.item()
-        print(f"Epoch {epoch}, Step {step}, Loss: {loss.item():.4f}, LR: {lr:.6f}")
-        if wandb.run is not None and step % log_interval == 0:
-            wandb.log(
-                {
-                    "train/loss": loss.item(),
-                    "train/learning_rate": lr,
-                },
-                step=epoch * len(data_loader) + step,
-            )
-
-    return total_loss / step if total_loss > 0 else 0.0
+    return loss.item(), lr
 
 
 def train(
@@ -100,25 +87,40 @@ def train(
     data_loader: DataLoader,
     optimizer: Optimizer,
     scheduler: LRScheduler,
-    num_epochs: int,
+    num_steps: int,
     save_interval: int,
     log_interval: int,
-    resume_epoch: int,
+    resume_step: int,
     save_dir: str,
 ):
-    os.makedirs(save_dir, exist_ok=True)
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
-    for epoch in range(resume_epoch, num_epochs + 1):
-        train_epoch(model, data_loader, optimizer, scheduler, epoch, log_interval)
+    for step, (data, targets) in enumerate(data_loader, start=resume_step):
+        loss, lr = train_step(model, data, targets, optimizer, scheduler)
 
-        if epoch % save_interval == 0 or epoch == num_epochs:
-            checkpoint_name = (
-                f"checkpoint_{epoch}.pt"
-                if epoch != num_epochs
-                else "checkpoint_final.pt"
-            )
-            checkpoint_path = os.path.join(save_dir, checkpoint_name)
-            save_checkpoint(model, optimizer, scheduler, epoch, checkpoint_path)
+        if step % log_interval == 0:
+            print(f"Step {step}, Loss: {loss:.4f}, LR: {lr:.6f}")
+            if wandb.run is not None:
+                wandb.log(
+                    {
+                        "train/loss": loss,
+                        "train/learning_rate": lr,
+                    },
+                    step=step,
+                )
+
+        if step == num_steps:
+            checkpoint_name = "checkpoint_final.pt"
+            checkpoint_path = save_dir / checkpoint_name
+            save_checkpoint(model, optimizer, scheduler, step, checkpoint_path)
+            print(f"Saved checkpoint to {checkpoint_path}")
+            break
+
+        if step % save_interval == 0:
+            checkpoint_name = f"checkpoint_{step}.pt"
+            checkpoint_path = save_dir / checkpoint_name
+            save_checkpoint(model, optimizer, scheduler, step, checkpoint_path)
             print(f"Saved checkpoint to {checkpoint_path}")
 
 
@@ -140,17 +142,17 @@ def main():
             config=config.model_dump(),
         )
 
-    model, data_loader, optimizer, scheduler, resume_epoch = setup_training(config)
+    model, data_loader, optimizer, scheduler, resume_step = setup_training(config)
 
     train(
         model,
         data_loader,
         optimizer,
         scheduler,
-        config.training.num_epochs,
+        config.training.num_steps,
         config.training.save_interval,
         config.training.log_interval,
-        resume_epoch,
+        resume_step,
         config.training.save_dir,
     )
 
