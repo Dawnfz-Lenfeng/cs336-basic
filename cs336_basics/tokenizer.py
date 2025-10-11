@@ -15,6 +15,9 @@ class BPETokenizer:
     ):
         self.vocab = vocab
         self.merges = merges
+        self.encoder = {v: k for k, v in vocab.items()}
+        self.ranks = {pair: i for i, pair in enumerate(merges)}
+
         if special_tokens:
             # Ensure longer tokens are matched first
             special_tokens.sort(key=len, reverse=True)
@@ -22,12 +25,11 @@ class BPETokenizer:
                 "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
             )
             self.special_token_set = set(special_tokens)
+            self.eos_token_id = self.encoder[special_tokens[0].encode("utf-8")]
         else:
             self.special_pattern = None
             self.special_token_set = set()
-
-        self.encoder = {v: k for k, v in vocab.items()}
-        self.ranks = {pair: i for i, pair in enumerate(merges)}
+            self.eos_token_id = None
 
     @classmethod
     def from_files(

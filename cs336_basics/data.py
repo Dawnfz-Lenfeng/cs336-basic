@@ -48,14 +48,16 @@ def save_checkpoint(
 def load_checkpoint(
     src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
     model: torch.nn.Module,
-    optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    optimizer: torch.optim.Optimizer | None = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
 ) -> tuple[int, str | None]:
     checkpoint = torch.load(src)
 
     model.load_state_dict(checkpoint["model_state"])
-    optimizer.load_state_dict(checkpoint["optim_state"])
-    scheduler.load_state_dict(checkpoint["scheduler_state"])
+    if optimizer:
+        optimizer.load_state_dict(checkpoint["optim_state"])
+    if scheduler:
+        scheduler.load_state_dict(checkpoint["scheduler_state"])
 
     return checkpoint["iteration"], checkpoint.get("wandb_run_id", None)
 
