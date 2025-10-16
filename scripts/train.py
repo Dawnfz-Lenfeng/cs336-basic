@@ -4,13 +4,13 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import torch.nn as nn
+import wandb
 import yaml
 from jaxtyping import Int
 from torch import Tensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
-import wandb
 from cs336_basics.data import DataLoader, load_checkpoint, save_checkpoint
 from cs336_basics.model import TransformerLM
 from cs336_basics.nn_utils import cross_entropy

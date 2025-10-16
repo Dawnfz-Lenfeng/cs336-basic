@@ -104,7 +104,6 @@ def find_chunk_bounds(
     file: BinaryIO,
     split_special_token: bytes,
     chunk_size: int = 5 * 1024 * 1024,
-    include_split_special_token: bool = False,
 ) -> list[int]:
     """Chunk the file into parts that can be counted independently"""
     file.seek(0, os.SEEK_END)
@@ -112,24 +111,12 @@ def find_chunk_bounds(
     file.seek(0)
 
     bounds = [0]
-    buffer = b""
-    pos = 0
 
-    while pos < file_size:
+    for pos in range(0, file_size, chunk_size):
         chunk = file.read(chunk_size)
-        if not chunk:
-            break
 
-        buffer += chunk
-        found_at = buffer.rfind(split_special_token)
-
-        if found_at != -1:
-            pos += found_at + len(split_special_token)
-            if not include_split_special_token:
-                bounds.append(pos - len(split_special_token))
-            else:
-                bounds.append(pos)
-            buffer = buffer[found_at + len(split_special_token) :]
+        if (found_at := chunk.rfind(split_special_token)) != -1:
+            bounds.append(pos + found_at + len(split_special_token))
 
     bounds.append(file_size)
     return bounds

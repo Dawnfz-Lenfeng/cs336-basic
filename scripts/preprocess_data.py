@@ -96,7 +96,6 @@ def tokenize_file(
             f,
             special_tokens[0].encode("utf-8"),
             chunk_size,
-            include_split_special_token=True,
         )
 
     args_list = [(input_path, chunk) for chunk in zip(bounds[:-1], bounds[1:])]

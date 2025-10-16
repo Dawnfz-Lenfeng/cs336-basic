@@ -2,8 +2,6 @@ import argparse
 
 import torch
 import yaml
-from jaxtyping import Int
-from torch import Tensor
 
 from cs336_basics.data import load_checkpoint
 from cs336_basics.model import TransformerLM
@@ -42,9 +40,7 @@ def generate_text(
     """Generate text from prompt."""
     # Encode prompt
     input_ids = tokenizer.encode(prompt)
-    input_tensor = torch.tensor(
-        input_ids, dtype=torch.long, device=device
-    )
+    input_tensor = torch.tensor(input_ids, dtype=torch.long, device=device)
 
     # Generate
     output_ids = model.generate(
