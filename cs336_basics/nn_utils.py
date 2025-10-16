@@ -23,8 +23,6 @@ def cross_entropy(
     targets: Int[Tensor, " ... seq_len"],
 ) -> Float[Tensor, ""]:
     log_probs = log_softmax(inputs)
-    loss = -einx.get_at(
-        "... seq_len [vocab], ... seq_len -> ... seq_len", log_probs, targets
-    )
+    loss = -log_probs.gather(-1, targets.unsqueeze(-1))
 
     return loss.mean()
