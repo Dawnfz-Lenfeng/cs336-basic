@@ -1,9 +1,8 @@
 import math
 
-import einx
 import torch
 import torch.nn as nn
-from einops import einsum, rearrange, repeat
+from einops import einsum, rearrange
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
@@ -198,9 +197,11 @@ class MultiheadSelfAttention(nn.Module):
         self.output_proj = Linear(d_model, d_model)
 
         if theta is not None and max_seq_len is not None:
-            self.rope = RotaryPositionalEmbedding(theta, self.d_k, max_seq_len)
+            self.positional_embedding = RotaryPositionalEmbedding(
+                theta, self.d_k, max_seq_len
+            )
         else:
-            self.rope = None
+            self.positional_embedding = None
 
     def forward(
         self,
@@ -218,14 +219,13 @@ class MultiheadSelfAttention(nn.Module):
         )
 
         Q, K, V = self.q_proj(x), self.k_proj(x), self.v_proj(x)
-
-        Q = rearrange(Q, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
-        K = rearrange(K, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
-        V = rearrange(V, "... seq_len (h d_k) -> ... h seq_len d_k", h=self.num_heads)
-
-        if self.rope:
-            Q = self.rope(Q, token_positions)
-            K = self.rope(K, token_positions)
+        Q, K, V = (
+            rearrange(X, "... seq (h d_k) -> ... h seq d_k", h=self.num_heads)
+            for X in (Q, K, V)
+        )
+        if self.positional_embedding:
+            Q = self.positional_embedding(Q, token_positions)
+            K = self.positional_embedding(K, token_positions)
 
         output = scaled_dot_product_attention(Q, K, V, mask)
         output = rearrange(output, "... h seq_len d_k -> ... seq_len (h d_k)")
