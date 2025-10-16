@@ -167,17 +167,13 @@ def scaled_dot_product_attention(
     mask: Bool[Tensor, " ... queries keys"] | None = None,
 ) -> Float[Tensor, " ... queries d_v"]:
     d_k = Q.size(-1)
-    scores = einsum(
-        Q, K, "... queries d_k, ... keys d_k -> ... queries keys"
-    ) / math.sqrt(d_k)
+    scores = Q @ K.transpose(-2, -1) / math.sqrt(d_k)
 
     if mask is not None:
-        scores = scores.masked_fill(~mask, -1e9)
+        scores = scores.where(mask, float("-inf"))
 
     attention_weights = softmax(scores, dim=-1)
-    output = einsum(
-        attention_weights, V, "... queries keys, ... keys d_v -> ... queries d_v"
-    )
+    output = attention_weights @ V
 
     return output
 
