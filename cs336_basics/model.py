@@ -118,21 +118,21 @@ class RotaryPositionalEmbedding(nn.Module):
         theta: float,
         d_k: int,
         max_seq_len: int,
-        device: torch.device | None = None,
     ):
         super().__init__()
 
-        cos, sin = self._precompute_freqs(theta, d_k, max_seq_len, device)
-        self.register_buffer("cos_cached", cos, persistent=False)
-        self.register_buffer("sin_cached", sin, persistent=False)
+        self.register_buffer(
+            "cis_cached",
+            self._init_cache(theta, d_k, max_seq_len),
+            persistent=False,
+        )
 
     def forward(
         self,
         x: Float[Tensor, " ... seq_len d_k"],
         token_positions: Int[Tensor, " ... seq_len"],
     ) -> Float[Tensor, " ... seq_len d_k"]:
-        cos = self.cos_cached[token_positions]
-        sin = self.sin_cached[token_positions]
+        cos, sin = self.cis_cached[:, token_positions]
 
         return (x * cos) + (self._rotate_half(x) * sin)
 
@@ -141,27 +141,23 @@ class RotaryPositionalEmbedding(nn.Module):
         x: Float[Tensor, " ... d_k"],
     ) -> Float[Tensor, " ... d_k"]:
         """Rotate (x1, x2, x3, x4, ...) to (-x2, x1, -x4, x3, ...)"""
-        x1, x2 = rearrange(x, "... (d_k_half pair) -> pair ... d_k_half", pair=2)
-        return einx.rearrange(
-            "... d_k_half, ... d_k_half -> ... (d_k_half 1 + 1)", -x2, x1
-        )
+        x1, x2 = x[..., ::2], x[..., 1::2]
+
+        return torch.stack((-x2, x1), dim=-1).reshape_as(x)
 
     @staticmethod
-    def _precompute_freqs(
+    def _init_cache(
         theta: float,
         d_k: int,
         max_seq_len: int,
-        device: torch.device | None = None,
-    ) -> tuple[Float[Tensor, "max_seq_len d_k"], Float[Tensor, "max_seq_len d_k"]]:
-        inv_freq = 1.0 / (
-            theta ** (torch.arange(0, d_k, 2, dtype=torch.float32, device=device) / d_k)
-        )
-        positions = torch.arange(max_seq_len, dtype=torch.float32, device=device)
+    ) -> Float[Tensor, "2 max_seq_len d_k"]:
+        freqs = theta ** (-torch.arange(0, d_k, 2) / d_k)
+        pos = torch.arange(max_seq_len)
 
-        freqs = torch.outer(positions, inv_freq)
-        freqs = repeat(freqs, "seq d_k_half -> seq (d_k_half pair)", pair=2)
+        freqs = torch.outer(pos, freqs)
+        freqs = freqs.repeat_interleave(2, dim=-1)
 
-        return freqs.cos(), freqs.sin()
+        return torch.stack((freqs.cos(), freqs.sin()))
 
 
 def scaled_dot_product_attention(
