@@ -24,11 +24,11 @@ class BPETokenizer:
             self.special_pattern = re.compile(
                 "(" + "|".join(re.escape(token) for token in special_tokens) + ")"
             )
-            self.special_token_set = set(special_tokens)
+            self.special_tokens = set(special_tokens)
             self.eos_token_id = self.encoder[special_tokens[0].encode("utf-8")]
         else:
             self.special_pattern = None
-            self.special_token_set = set()
+            self.special_tokens = set()
             self.eos_token_id = None
 
     @classmethod
@@ -75,7 +75,7 @@ class BPETokenizer:
 
         ids = []
         for part in parts:
-            if part in self.special_token_set:
+            if part in self.special_tokens:
                 ids.append(self.encoder[part.encode("utf-8")])
             elif part:
                 pretokens = [

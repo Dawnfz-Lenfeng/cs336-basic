@@ -167,9 +167,9 @@ def pop_most_frequent_pair(
 def merge_pair(
     pretoken_counts: Counter[tuple[int, ...]],
     pair_heap: LazyHeap,
+    pair2pretoken: dict[tuple[int, int], set[tuple[int, ...]]],
     pair_to_merge: tuple[int, int],
     new_token: int,
-    pair2pretoken: dict[tuple[int, int], set[tuple[int, ...]]],
 ):
     """Merge a pair of tokens in the pretoken counts, updating the counts of the new and adjacent pairs"""
     items_to_merge = [
@@ -279,7 +279,7 @@ def train_bpe(
         merges.append((byte1, byte2))
         vocab.append(byte1 + byte2)
 
-        merge_pair(pretoken_counts, pair_heap, pair, len(vocab) - 1, pair2pretoken)
+        merge_pair(pretoken_counts, pair_heap, pair2pretoken, pair, len(vocab) - 1)
 
     vocab.extend(token.encode("utf-8") for token in special_tokens)
     return {i: token for i, token in enumerate(vocab)}, merges

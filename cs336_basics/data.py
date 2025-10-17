@@ -21,8 +21,9 @@ def get_batch(
     x = dataset[indices]
     y = dataset[indices + 1]
 
-    return torch.from_numpy(x).to(device, dtype=torch.long), torch.from_numpy(y).to(
-        device, dtype=torch.long
+    return (
+        torch.from_numpy(x).to(device, dtype=torch.long),
+        torch.from_numpy(y).to(device, dtype=torch.long),
     )
 
 

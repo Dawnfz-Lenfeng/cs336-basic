@@ -2,7 +2,7 @@ import math
 
 import torch
 import torch.nn as nn
-from einops import einsum, rearrange
+from einops import rearrange
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
@@ -34,7 +34,7 @@ class Linear(nn.Module):
         )
 
     def forward(self, x: Float[Tensor, " ... d_in"]) -> Float[Tensor, " ... d_out"]:
-        return einsum(x, self.weight, "... d_in, d_out d_in -> ... d_out")
+        return x @ self.weight.T
 
 
 class Embedding(nn.Module):

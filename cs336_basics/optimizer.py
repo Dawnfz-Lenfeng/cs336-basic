@@ -35,11 +35,7 @@ class AdamW(optim.Optimizer):
                 state: dict[str, Any] = self.state[p]
                 # if state is empty dict, initialize
                 if not state:
-                    state.update(
-                        t=0,
-                        m=torch.zeros_like(p.data),
-                        v=torch.zeros_like(p.data),
-                    )
+                    state.update(t=0, m=torch.zeros_like(p), v=torch.zeros_like(p))
                 state["t"] += 1
 
                 self._update_param(
@@ -77,7 +73,7 @@ class AdamW(optim.Optimizer):
         bias_correction2 = 1 - beta2**t
         step_size = lr * (bias_correction2**0.5) / bias_correction1
 
-        p.data.addcdiv_(m, v.sqrt().add_(eps), value=-step_size)
+        p.data.addcdiv_(m, v.add_(eps).sqrt(), value=-step_size)
         p.data.mul_(1 - lr * weight_decay)
 
 
@@ -91,12 +87,12 @@ def get_lr_cosine_schedule(
     if it < warmup_iters:
         return it / warmup_iters * max_learning_rate
 
-    if it <= cosine_cycle_iters:
-        progress = (it - warmup_iters) / (cosine_cycle_iters - warmup_iters)
-        cos_factor = 0.5 * (1 + math.cos(progress * math.pi))
-        return min_learning_rate + (max_learning_rate - min_learning_rate) * cos_factor
+    if it > cosine_cycle_iters:
+        return min_learning_rate
 
-    return min_learning_rate
+    decay_ratio = (it - warmup_iters) / (cosine_cycle_iters - warmup_iters)
+    cos_factor = 0.5 * (1 + math.cos(decay_ratio * math.pi))
+    return min_learning_rate + (max_learning_rate - min_learning_rate) * cos_factor
 
 
 def get_cosine_scheduler(
